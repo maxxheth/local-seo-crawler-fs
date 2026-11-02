@@ -213,8 +213,11 @@ class SitemapDiscovery:
                     pass
 
             xml_str = content.decode("utf-8", errors="ignore")
-            # Remove namespace prefixes to make tag matching simple
-            xml_clean = re.sub(r' xmlns(:[a-zA-Z0-9]+)?="[^"]+"', "", xml_str, count=1)
+            # Clean XML of namespaces, prefixes and schema locations for reliable parsing
+            xml_clean = re.sub(r'<([a-zA-Z0-9_-]+):', r'<\1_', xml_str)
+            xml_clean = re.sub(r'</([a-zA-Z0-9_-]+):', r'</\1_', xml_clean)
+            xml_clean = re.sub(r'\sxmlns(?::[a-zA-Z0-9_-]+)?="[^"]*"', '', xml_clean)
+            xml_clean = re.sub(r'\sxsi:[a-zA-Z0-9_-]+="[^"]*"', '', xml_clean)
             root = ET.fromstring(xml_clean)
 
             # Check if sitemap index

@@ -6,6 +6,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 artifacts/
+artifacts*/
 bin/
 *.mojoc
 .env
+*.db
+*.db-shm
+*.db-wal
