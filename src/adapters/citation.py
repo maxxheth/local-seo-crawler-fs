@@ -263,7 +263,9 @@ class CitationAdapter:
         lower_html = raw_html.lower()
         if "bbb accredited" in lower_html or "accredited since" in lower_html:
             badges.append("BBB Accredited")
-        if "verified owner" in lower_html or "claimed" in lower_html:
+        if "verified owner" in lower_html or (
+            re.search(r"\bclaimed\b", lower_html) and "unclaimed" not in lower_html
+        ):
             badges.append("Verified Owner / Claimed")
         if "license verified" in lower_html or "verified license" in lower_html:
             badges.append("Verified License")

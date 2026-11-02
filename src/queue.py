@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 import sqlite3
 from typing import Any
-import uuid
 
 from src.sitemap import normalize_url
 
@@ -16,8 +15,8 @@ class FrontierQueue(ABC):
     """Abstract frontier queue interface for chunked scraping."""
 
     @abstractmethod
-    def push_targets(self, targets: list[dict[str, Any]]) -> int:
-        """Add targets to frontier if not already seen. Returns number of new targets added."""
+    def push_targets(self, targets: list[dict[str, Any]], allow_seen: bool = False) -> int:
+        """Add targets to frontier if not already seen (or unconditionally if allow_seen=True)."""
         ...
 
     @abstractmethod
@@ -81,7 +80,7 @@ class SQLiteFrontierQueue(FrontierQueue):
             CREATE INDEX IF NOT EXISTS idx_{self.queue_name}_status ON {self.queue_name}_jobs(status);
             """)
 
-    def push_targets(self, targets: list[dict[str, Any]]) -> int:
+    def push_targets(self, targets: list[dict[str, Any]], allow_seen: bool = False) -> int:
         if not targets:
             return 0
         added = 0
@@ -92,10 +91,9 @@ class SQLiteFrontierQueue(FrontierQueue):
                 t_copy = dict(t)
                 t_copy["url"] = norm_u
 
-                # Try inserting into seen
-                try:
+                if allow_seen:
                     conn.execute(
-                        f"INSERT INTO {self.queue_name}_seen (url) VALUES (?)",
+                        f"INSERT OR IGNORE INTO {self.queue_name}_seen (url) VALUES (?)",
                         (norm_u,),
                     )
                     conn.execute(
@@ -103,12 +101,25 @@ class SQLiteFrontierQueue(FrontierQueue):
                         (norm_u, json.dumps(t_copy, ensure_ascii=False), int(t_copy.get("retries", 0))),
                     )
                     added += 1
-                except sqlite3.IntegrityError:
-                    # Already seen
-                    continue
+                else:
+                    try:
+                        conn.execute(
+                            f"INSERT INTO {self.queue_name}_seen (url) VALUES (?)",
+                            (norm_u,),
+                        )
+                        conn.execute(
+                            f"INSERT INTO {self.queue_name}_jobs (url, data, retries, status) VALUES (?, ?, ?, 'pending')",
+                            (norm_u, json.dumps(t_copy, ensure_ascii=False), int(t_copy.get("retries", 0))),
+                        )
+                        added += 1
+                    except sqlite3.IntegrityError:
+                        # Already seen
+                        continue
         return added
 
     def pop_chunk(self, chunk_size: int) -> list[dict[str, Any]]:
+        if chunk_size <= 0:
+            return []
         with self._get_conn() as conn:
             rows = conn.execute(
                 f"SELECT id, data FROM {self.queue_name}_jobs WHERE status = 'pending' ORDER BY id ASC LIMIT ?",
@@ -159,7 +170,7 @@ class RedisFrontierQueue(FrontierQueue):
         self.queue_key = f"{queue_name}:jobs"
         self.seen_key = f"{queue_name}:seen"
 
-    def push_targets(self, targets: list[dict[str, Any]]) -> int:
+    def push_targets(self, targets: list[dict[str, Any]], allow_seen: bool = False) -> int:
         if not targets:
             return 0
         added = 0
@@ -170,16 +181,22 @@ class RedisFrontierQueue(FrontierQueue):
             t_copy = dict(t)
             t_copy["url"] = norm_u
 
-            # SADD returns 1 if new, 0 if already in set
-            is_new = self.client.sadd(self.seen_key, norm_u)
-            if is_new:
+            if allow_seen:
+                self.client.sadd(self.seen_key, norm_u)
                 pipeline.rpush(self.queue_key, json.dumps(t_copy, ensure_ascii=False))
                 added += 1
+            else:
+                # SADD returns 1 if new, 0 if already in set
+                is_new = self.client.sadd(self.seen_key, norm_u)
+                if is_new:
+                    pipeline.rpush(self.queue_key, json.dumps(t_copy, ensure_ascii=False))
+                    added += 1
         pipeline.execute()
         return added
 
     def pop_chunk(self, chunk_size: int) -> list[dict[str, Any]]:
-        # Atomically pop up to chunk_size items
+        if chunk_size <= 0:
+            return []
         chunk: list[dict[str, Any]] = []
         for _ in range(chunk_size):
             item = self.client.lpop(self.queue_key)

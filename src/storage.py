@@ -1,4 +1,4 @@
-"""Persistent SQLite storage for crawl state, records, and evidence."""
+"""Persistent SQLite storage for crawl state, records, link graph, and evidence."""
 
 from __future__ import annotations
 
@@ -7,9 +7,14 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
+from src.models import (
+    InternalLinkEdge,
+    SEOIssue,
+)
+
 
 class SQLiteStorage:
-    """Manages an ACID, WAL-mode SQLite database for checkpointing crawl results."""
+    """Manages an ACID, WAL-mode SQLite database for checkpointing crawl results and link graph."""
 
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
@@ -19,7 +24,6 @@ class SQLiteStorage:
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path), timeout=30.0)
         conn.row_factory = sqlite3.Row
-        # High performance concurrent settings
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA busy_timeout=30000;")
@@ -44,9 +48,31 @@ class SQLiteStorage:
                 word_count INTEGER,
                 internal_outlinks_count INTEGER,
                 external_outlinks_count INTEGER,
+                response_time_ms INTEGER DEFAULT 0,
+                page_size_bytes INTEGER DEFAULT 0,
+                inlinks_count INTEGER DEFAULT 0,
                 is_ssr INTEGER,
                 raw_json TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS internal_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_url TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                anchor_text TEXT,
+                placement TEXT,
+                is_nofollow INTEGER DEFAULT 0,
+                target_status INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS seo_issues (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                category TEXT NOT NULL,
+                issue TEXT NOT NULL,
+                details TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS citations (
@@ -81,6 +107,9 @@ class SQLiteStorage:
             );
 
             CREATE INDEX IF NOT EXISTS idx_pages_domain ON pages(domain);
+            CREATE INDEX IF NOT EXISTS idx_internal_links_source ON internal_links(source_url);
+            CREATE INDEX IF NOT EXISTS idx_internal_links_target ON internal_links(target_url);
+            CREATE INDEX IF NOT EXISTS idx_seo_issues_url ON seo_issues(url);
             CREATE INDEX IF NOT EXISTS idx_evidence_source ON evidence(source_url);
             """)
 
@@ -97,17 +126,19 @@ class SQLiteStorage:
             return json.loads(row["value"]) if row else None
 
     def save_page(self, page_data: dict[str, Any], domain: str = "", depth: int = 0) -> None:
+        url = page_data.get("url", "")
         with self._get_connection() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO pages (
                     url, domain, depth, status_code, title, meta_description,
                     canonical_url, word_count, internal_outlinks_count,
-                    external_outlinks_count, is_ssr, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    external_outlinks_count, response_time_ms, page_size_bytes,
+                    inlinks_count, is_ssr, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    page_data.get("url", ""),
+                    url,
                     domain,
                     depth,
                     page_data.get("status_code", 200),
@@ -117,10 +148,150 @@ class SQLiteStorage:
                     page_data.get("word_count", 0),
                     page_data.get("internal_outlinks_count", 0),
                     page_data.get("external_outlinks_count", 0),
+                    page_data.get("response_time_ms", 0),
+                    page_data.get("page_size_bytes", 0),
+                    page_data.get("inlinks_count", 0),
                     1 if page_data.get("is_ssr", True) else 0,
                     json.dumps(page_data, ensure_ascii=False),
                 ),
             )
+
+    def save_internal_links_batch(self, links: list[InternalLinkEdge | dict[str, Any]]) -> None:
+        if not links:
+            return
+        source_urls = {
+            (l.source_url if isinstance(l, InternalLinkEdge) else l.get("source_url", ""))
+            for l in links
+        }
+        rows = [
+            (
+                l.source_url if isinstance(l, InternalLinkEdge) else l.get("source_url", ""),
+                l.target_url if isinstance(l, InternalLinkEdge) else l.get("target_url", ""),
+                l.anchor_text if isinstance(l, InternalLinkEdge) else l.get("anchor_text", ""),
+                l.placement if isinstance(l, InternalLinkEdge) else l.get("placement", "body"),
+                1 if (l.is_nofollow if isinstance(l, InternalLinkEdge) else l.get("is_nofollow", False)) else 0,
+                l.target_status if isinstance(l, InternalLinkEdge) else l.get("target_status"),
+            )
+            for l in links
+        ]
+        with self._get_connection() as conn:
+            for src in source_urls:
+                if src:
+                    conn.execute("DELETE FROM internal_links WHERE source_url = ?", (src,))
+            conn.executemany(
+                """
+                INSERT INTO internal_links (
+                    source_url, target_url, anchor_text, placement, is_nofollow, target_status
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+
+    def save_seo_issues_batch(self, issues: list[SEOIssue | dict[str, Any]]) -> None:
+        if not issues:
+            return
+        rows = [
+            (
+                i.url if isinstance(i, SEOIssue) else i.get("url", ""),
+                i.severity if isinstance(i, SEOIssue) else i.get("severity", "warning"),
+                i.category if isinstance(i, SEOIssue) else i.get("category", "SEO"),
+                i.issue if isinstance(i, SEOIssue) else i.get("issue", ""),
+                i.details if isinstance(i, SEOIssue) else i.get("details", ""),
+            )
+            for i in issues
+        ]
+        with self._get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO seo_issues (url, severity, category, issue, details)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+
+    def post_crawl_sync(self, duplicate_issues: dict[str, SEOIssue] | None = None) -> None:
+        """Run post-crawl link status backfill, compute inlinks, and update pages with broken links."""
+        with self._get_connection() as conn:
+            # 1. Backfill target_status on internal_links from pages table
+            conn.execute("""
+            UPDATE internal_links
+            SET target_status = (
+                SELECT p.status_code FROM pages p WHERE p.url = internal_links.target_url
+            )
+            WHERE target_status IS NULL
+            """)
+
+            # 2. Compute inlinks_count per page
+            inlink_rows = conn.execute("""
+            SELECT target_url, COUNT(*) as cnt
+            FROM internal_links
+            GROUP BY target_url
+            """).fetchall()
+            inlinks_map = {r["target_url"]: r["cnt"] for r in inlink_rows}
+
+            # 3. Find broken outlinks (target_status >= 400), deduplicated per (source_url, target_url)
+            broken_rows = conn.execute("""
+            SELECT DISTINCT source_url, target_url, target_status
+            FROM internal_links
+            WHERE target_status >= 400
+            """).fetchall()
+            broken_map: dict[str, list[str]] = {}
+            for br in broken_rows:
+                broken_map.setdefault(br["source_url"], []).append(br["target_url"])
+
+            # Clear any previously synced post-crawl issues so re-runs are idempotent
+            conn.execute(
+                "DELETE FROM seo_issues WHERE issue IN ('Broken Internal Link', 'Duplicate Content Detected')"
+            )
+
+            # 4. Update raw_json and inlinks_count for all pages
+            page_rows = conn.execute("SELECT url, raw_json FROM pages").fetchall()
+            updated_pages = []
+            new_broken_issues = []
+
+            for pr in page_rows:
+                u = pr["url"]
+                data = json.loads(pr["raw_json"])
+                data["inlinks_count"] = inlinks_map.get(u, 0)
+                b_links = broken_map.get(u, [])
+                data["broken_outlinks"] = b_links
+
+                # Filter out stale post-crawl issues before re-adding
+                existing_issues = [
+                    iss
+                    for iss in data.get("issues", [])
+                    if iss.get("issue") not in ("Broken Internal Link", "Duplicate Content Detected")
+                ]
+
+                # Add broken link issues
+                for bl in b_links:
+                    iss = {
+                        "url": u,
+                        "severity": "error",
+                        "category": "Links",
+                        "issue": "Broken Internal Link",
+                        "details": f"Page links to broken internal URL: {bl}",
+                    }
+                    existing_issues.append(iss)
+                    new_broken_issues.append(iss)
+
+                # Add duplicate content issues if flagged
+                if duplicate_issues and u in duplicate_issues:
+                    dup_iss = duplicate_issues[u].model_dump()
+                    existing_issues.append(dup_iss)
+
+                data["issues"] = existing_issues
+                updated_pages.append((data["inlinks_count"], json.dumps(data, ensure_ascii=False), u))
+
+            conn.executemany(
+                "UPDATE pages SET inlinks_count = ?, raw_json = ? WHERE url = ?",
+                updated_pages,
+            )
+
+        if new_broken_issues:
+            self.save_seo_issues_batch(new_broken_issues)
+        if duplicate_issues:
+            self.save_seo_issues_batch(list(duplicate_issues.values()))
 
     def save_citation(self, citation_data: dict[str, Any]) -> None:
         with self._get_connection() as conn:

@@ -108,6 +108,13 @@ def build_parser(defaults: dict[str, object]) -> argparse.ArgumentParser:
         help="Optional Redis URL for distributed frontier queue (e.g. redis://localhost:6379/0)",
     )
     parser.add_argument(
+        "--sqlite-db-name",
+        dest="sqlite_db_name",
+        type=str,
+        default=str(defaults.get("sqlite_db_name", "crawl_results.db")),
+        help="SQLite database filename inside output-dir [default: crawl_results.db]",
+    )
+    parser.add_argument(
         "--no-sitemap",
         dest="use_sitemap",
         action="store_false",
@@ -167,6 +174,78 @@ def build_parser(defaults: dict[str, object]) -> argparse.ArgumentParser:
         default=str(defaults.get("tar_compression", "gz")),
         help="Tarball compression algorithm: gz, bz2, xz, zst, or none [default: gz]",
     )
+
+    # Configurable SEO Audit Threshold Flags
+    parser.add_argument(
+        "--title-min-len",
+        dest="title_min_len",
+        type=int,
+        default=int(defaults.get("title_min_len", 30)),
+        help="Minimum recommended page title length [default: 30]",
+    )
+    parser.add_argument(
+        "--title-max-len",
+        dest="title_max_len",
+        type=int,
+        default=int(defaults.get("title_max_len", 60)),
+        help="Maximum recommended page title length [default: 60]",
+    )
+    parser.add_argument(
+        "--desc-min-len",
+        dest="desc_min_len",
+        type=int,
+        default=int(defaults.get("desc_min_len", 120)),
+        help="Minimum recommended meta description length [default: 120]",
+    )
+    parser.add_argument(
+        "--desc-max-len",
+        dest="desc_max_len",
+        type=int,
+        default=int(defaults.get("desc_max_len", 160)),
+        help="Maximum recommended meta description length [default: 160]",
+    )
+    parser.add_argument(
+        "--min-word-count",
+        dest="min_word_count",
+        type=int,
+        default=int(defaults.get("min_word_count", 300)),
+        help="Thin content minimum word threshold [default: 300]",
+    )
+    parser.add_argument(
+        "--dup-threshold",
+        dest="dup_threshold",
+        type=float,
+        default=float(defaults.get("dup_threshold", 0.85)),
+        help="Near-duplicate content similarity threshold ratio (0.0-1.0) [default: 0.85]",
+    )
+    parser.add_argument(
+        "--slow-warn-ms",
+        dest="slow_warn_ms",
+        type=int,
+        default=int(defaults.get("slow_warn_ms", 1000)),
+        help="Response time warning threshold in milliseconds [default: 1000]",
+    )
+    parser.add_argument(
+        "--slow-err-ms",
+        dest="slow_err_ms",
+        type=int,
+        default=int(defaults.get("slow_err_ms", 3000)),
+        help="Response time error threshold in milliseconds [default: 3000]",
+    )
+    parser.add_argument(
+        "--large-warn-bytes",
+        dest="large_warn_bytes",
+        type=int,
+        default=int(defaults.get("large_warn_bytes", 1048576)),
+        help="HTML page size warning threshold in bytes [default: 1048576]",
+    )
+    parser.add_argument(
+        "--large-err-bytes",
+        dest="large_err_bytes",
+        type=int,
+        default=int(defaults.get("large_err_bytes", 3145728)),
+        help="HTML page size error threshold in bytes [default: 3145728]",
+    )
     return parser
 
 
@@ -182,6 +261,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "chunk_size": 15,
             "output_dir": "artifacts",
             "flaresolverr_url": "http://localhost:8193",
+            "sqlite_db_name": "crawl_results.db",
             "use_sitemap": True,
             "fast_http_first": True,
             "enable_competitor": True,
@@ -190,6 +270,16 @@ def main(argv: Sequence[str] | None = None) -> None:
             "export_chunk_size": 250,
             "archive_format": "none",
             "tar_compression": "gz",
+            "title_min_len": 30,
+            "title_max_len": 60,
+            "desc_min_len": 120,
+            "desc_max_len": 160,
+            "min_word_count": 300,
+            "dup_threshold": 0.85,
+            "slow_warn_ms": 1000,
+            "slow_err_ms": 3000,
+            "large_warn_bytes": 1048576,
+            "large_err_bytes": 3145728,
         }
 
     parser = build_parser(cfg)
@@ -212,12 +302,23 @@ def main(argv: Sequence[str] | None = None) -> None:
         use_sitemap=args.use_sitemap,
         fast_http_first=args.fast_http_first,
         redis_url=args.redis_url,
+        sqlite_db_name=args.sqlite_db_name,
         export_format=args.export_format,
         export_mode=args.export_mode,
         export_chunk_size=args.export_chunk_size,
         archive_format=args.archive_format,
         tar_compression=args.tar_compression,
         enable_competitor=args.enable_competitor,
+        title_min_len=args.title_min_len,
+        title_max_len=args.title_max_len,
+        desc_min_len=args.desc_min_len,
+        desc_max_len=args.desc_max_len,
+        min_word_count=args.min_word_count,
+        dup_threshold=args.dup_threshold,
+        slow_warn_ms=args.slow_warn_ms,
+        slow_err_ms=args.slow_err_ms,
+        large_warn_bytes=args.large_warn_bytes,
+        large_err_bytes=args.large_err_bytes,
     )
     orchestrator.run()
 

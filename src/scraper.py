@@ -1,11 +1,11 @@
-"""Python Core Scraper: Fast-HTTP first with FlareSolverr escalation and parsing."""
+"""Python Core Scraper: Fast-HTTP first with FlareSolverr escalation, timing, and parsing."""
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
+import time
 from typing import Any
 from urllib.parse import quote_plus
 
@@ -17,6 +17,7 @@ from src.adapters.serp import LocalSerpAdapter
 from src.config import extract_proxy_port, load_config, load_proxies
 from src.flaresolverr import FlareSolverrClient
 from src.output import OutputManager
+from src.seo_auditor import SEOAuditConfig, audit_page
 from src.sitemap import SitemapDiscovery, normalize_url
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -160,10 +161,9 @@ def _detect_challenge(html: str) -> bool:
         "just a moment..." in lower
         or "cf-browser-verification" in lower
         or "attention required! | cloudflare" in lower
-        or "access denied" in lower
-        or "ray id:" in lower
         or "checking your browser before accessing" in lower
         or "please complete the security check" in lower
+        or ("access denied" in lower and ("cloudflare" in lower or "ray id:" in lower))
     )
 
 
@@ -171,8 +171,9 @@ def execute_single_scrape(
     job: dict[str, Any],
     shared_client: httpx.Client | None = None,
     cookie_jar: dict[str, str] | None = None,
+    audit_cfg: SEOAuditConfig | None = None,
 ) -> dict[str, Any]:
-    """Execute scrape with fast-HTTP first, escalating to FlareSolverr on challenge."""
+    """Execute scrape with fast-HTTP first, timing measurement, and SEO issue audit."""
     mode = job.get("mode", "citations")
     url = job.get("url", "")
     session_id = job.get("session_id")
@@ -189,6 +190,8 @@ def execute_single_scrape(
     solved_cookies: list[dict[str, Any]] = []
     solved_user_agent: str | None = None
 
+    t0 = time.monotonic()
+
     # Step 1: Fast HTTP attempt (if enabled and mode permits)
     should_try_fast_http = fast_http_first and (mode in ("competitor", "citations"))
     if should_try_fast_http:
@@ -204,6 +207,9 @@ def execute_single_scrape(
                 client_kwargs["proxy"] = proxy_url
 
             if shared_client is not None:
+                if cookie_jar:
+                    for ck, cv in cookie_jar.items():
+                        shared_client.cookies.set(ck, cv)
                 r = shared_client.get(url, timeout=15.0)
             else:
                 with httpx.Client(**client_kwargs) as h_client:
@@ -213,7 +219,6 @@ def execute_single_scrape(
             html = r.text
             final_url = str(r.url)
 
-            # Check if this fast-HTTP hit a challenge
             if status_code in (403, 429, 503) or _detect_challenge(html):
                 logger.debug("Fast HTTP encountered challenge (HTTP %d) on %s; escalating", status_code, url)
                 html = ""
@@ -222,7 +227,7 @@ def execute_single_scrape(
             logger.debug("Fast HTTP error on %s: %s; escalating to FlareSolverr", url, fast_exc)
             html = ""
 
-    # Step 2: Escalate to FlareSolverr if HTML is still empty (challenge, 403, or fast_http_first disabled)
+    # Step 2: Escalate to FlareSolverr if HTML is still empty
     if not html:
         client = FlareSolverrClient(base_url=flaresolverr_url, max_timeout=max_timeout)
         try:
@@ -248,6 +253,9 @@ def execute_single_scrape(
         finally:
             client.close()
 
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    page_size_bytes = len(html.encode("utf-8")) if html else 0
+
     # Step 3: Parse according to adapter
     if mode == "citations":
         adapter = CitationAdapter(platform=job.get("platform"))
@@ -271,29 +279,41 @@ def execute_single_scrape(
             "evidence": [evidence_rec.model_dump()],
             "solved_cookies": solved_cookies,
             "solved_user_agent": solved_user_agent,
+            "response_time_ms": elapsed_ms,
         }
 
     elif mode == "competitor":
         comp_adapter = CompetitorSiteAdapter()
-        page_rec, ev_list, discovered_links = comp_adapter.parse(
+        page_rec, ev_list, discovered_links, link_edges = comp_adapter.parse(
             url=url,
             html=html,
             http_status=status_code,
             final_url=final_url,
+            response_time_ms=elapsed_ms,
+            page_size_bytes=page_size_bytes,
         )
         is_challenge = _detect_challenge(html)
         is_success = (status_code == 200) and bool(html) and not is_challenge
+
+        # Run per-page SEO issues check
+        cfg = audit_cfg or SEOAuditConfig()
+        issues = audit_page(page_rec, cfg)
+        page_rec.issues = issues
+
         return {
             "success": is_success,
             "status_code": status_code,
             "error": error_msg or (None if is_success else ("Cloudflare challenge detected" if is_challenge else "HTTP error")),
             "domain": job.get("domain"),
             "depth": job.get("depth", 0),
-            "internal_urls": discovered_links,  # Full discovered URLs for frontier expansion
+            "internal_urls": discovered_links,
+            "link_edges": [e.model_dump() for e in link_edges],
+            "issues": [i.model_dump() for i in issues],
             "result": page_rec.model_dump(),
             "evidence": [e.model_dump() for e in ev_list],
             "solved_cookies": solved_cookies,
             "solved_user_agent": solved_user_agent,
+            "response_time_ms": elapsed_ms,
         }
 
     elif mode == "serp":
@@ -316,6 +336,7 @@ def execute_single_scrape(
             "evidence": [e.model_dump() for e in ev_list],
             "solved_cookies": solved_cookies,
             "solved_user_agent": solved_user_agent,
+            "response_time_ms": elapsed_ms,
         }
 
     return {

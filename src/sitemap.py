@@ -5,7 +5,6 @@ from __future__ import annotations
 import gzip
 import logging
 import re
-from typing import Iterable, Set
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 import xml.etree.ElementTree as ET
 

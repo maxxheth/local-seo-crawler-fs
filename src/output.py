@@ -20,8 +20,11 @@ from src.models import (
     CitationSummary,
     EvidenceManifest,
     EvidenceRecord,
+    PageTechnicalRecord,
+    SiteAuditSummary,
     SiteCrawlArtifact,
 )
+from src.seo_auditor import generate_site_summary
 from src.storage import SQLiteStorage
 
 
@@ -63,7 +66,6 @@ def write_csv_file(file_path: Path | str, rows: list[dict[str, Any]]) -> str:
         return str(path.resolve())
 
     flattened = [flatten_record_for_csv(r) for r in rows]
-    # Collect all unique fieldnames
     fieldnames: list[str] = []
     for r in flattened:
         for k in r.keys():
@@ -120,7 +122,6 @@ class OutputManager:
                 else:
                     written_files.append(write_json_file(file_path, batch))
         else:
-            # Single file export
             file_path = self.output_dir / f"{base_name}.{ext}"
             if ext == "json":
                 written_files.append(write_json_file(file_path, data))
@@ -139,7 +140,6 @@ class OutputManager:
         if self.archive_format == "none" or not file_paths:
             return None
 
-        # Filter to paths that exist
         valid_paths = [Path(p) for p in file_paths if Path(p).exists()]
         if not valid_paths:
             return None
@@ -227,17 +227,14 @@ class OutputManager:
             citations=[CitationItem(**c) for c in clean_citations],
         )
 
-        # Standard canonical JSON
         json_path = self.output_dir / "citations_manifest.json"
         write_json_file(json_path, manifest.model_dump())
 
-        # Configured multi-format / chunked output
         all_created_files = [str(json_path)]
         if self.export_format != "json" or self.export_mode in ("multi", "chunked"):
             exported_custom = self._write_data("citations_manifest", clean_citations, is_list_records=True)
             all_created_files.extend(exported_custom)
 
-        # Evidence manifest
         clean_evidence: list[dict[str, Any]] = []
         if evidence_records:
             for ev in evidence_records:
@@ -267,14 +264,18 @@ class OutputManager:
         pages: list[dict[str, Any]],
         crawl_depth: int = 1,
         evidence_records: list[dict[str, Any] | EvidenceRecord] | None = None,
+        audit_summary: SiteAuditSummary | None = None,
     ) -> dict[str, str]:
         """Export site_crawl_artifact and evidence_manifest."""
-        manifest_id = f"evd_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        # Calculate summary if not explicitly provided
+        page_objs = [p if isinstance(p, PageTechnicalRecord) else PageTechnicalRecord(**p) for p in pages]
+        summary = audit_summary or generate_site_summary(page_objs)
 
         site_artifact = SiteCrawlArtifact(
             target_domain=target_domain,
             crawl_depth=crawl_depth,
-            pages=pages,  # type: ignore
+            pages=page_objs,
+            audit_summary=summary,
         )
 
         json_path = self.output_dir / "site_crawl_artifact.json"
@@ -283,7 +284,11 @@ class OutputManager:
 
         # Custom format or chunked multi-file export
         if self.export_format != "json" or self.export_mode in ("multi", "chunked"):
-            exported_custom = self._write_data("site_crawl_artifact", pages, is_list_records=True)
+            exported_custom = self._write_data(
+                "site_crawl_artifact",
+                [p.model_dump() for p in page_objs],
+                is_list_records=True,
+            )
             all_created_files.extend(exported_custom)
 
         # Evidence manifest
@@ -293,7 +298,7 @@ class OutputManager:
                 clean_evidence.append(ev.model_dump() if isinstance(ev, EvidenceRecord) else ev)
 
         ev_manifest = EvidenceManifest(
-            manifest_id=manifest_id,
+            manifest_id=f"evd_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
             records=[EvidenceRecord(**e) for e in clean_evidence],
         )
         ev_json_path = self.output_dir / "evidence_manifest.json"
@@ -316,11 +321,13 @@ class OutputManager:
         evidence_records: list[dict[str, Any] | EvidenceRecord] | None = None,
     ) -> dict[str, str]:
         """Export serp_artifact and evidence_manifest."""
-        manifest_id = f"evd_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-
         serp_path = self.output_dir / "serp_artifact.json"
         write_json_file(serp_path, serp_data)
         all_created_files = [str(serp_path)]
+
+        if self.export_format != "json":
+            exported_custom = self._write_data("serp_artifact", serp_data, is_list_records=False)
+            all_created_files.extend(exported_custom)
 
         clean_evidence: list[dict[str, Any]] = []
         if evidence_records:
@@ -328,7 +335,7 @@ class OutputManager:
                 clean_evidence.append(ev.model_dump() if isinstance(ev, EvidenceRecord) else ev)
 
         ev_manifest = EvidenceManifest(
-            manifest_id=manifest_id,
+            manifest_id=f"evd_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
             records=[EvidenceRecord(**e) for e in clean_evidence],
         )
         evidence_path = self.output_dir / "evidence_manifest.json"
@@ -351,16 +358,16 @@ class OutputManager:
         mode: str,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, str]:
-        """Export artifacts directly from SQLite storage, avoiding keeping all pages in memory."""
+        """Export artifacts directly from SQLite storage."""
         meta = meta or {}
         evidence_all = storage.fetch_all_evidence()
 
         if mode == "competitor":
-            pages = storage.fetch_all_pages()
+            pages_raw = storage.fetch_all_pages()
             target_domain = meta.get("domain", "competitor.com")
             return self.export_site_crawl(
                 target_domain=target_domain,
-                pages=pages,
+                pages=pages_raw,
                 crawl_depth=meta.get("max_depth", 5),
                 evidence_records=evidence_all,
             )

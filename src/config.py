@@ -52,6 +52,18 @@ def load_config() -> dict[str, Any]:
     archive_format = os.getenv("ARCHIVE_FORMAT", "none").strip().lower()
     tar_compression = os.getenv("TAR_COMPRESSION", "gz").strip().lower()
 
+    # General SEO Audit Thresholds
+    title_min_len = int(os.getenv("SEO_TITLE_MIN_LEN", "30"))
+    title_max_len = int(os.getenv("SEO_TITLE_MAX_LEN", "60"))
+    desc_min_len = int(os.getenv("SEO_DESC_MIN_LEN", "120"))
+    desc_max_len = int(os.getenv("SEO_DESC_MAX_LEN", "160"))
+    min_word_count = int(os.getenv("SEO_MIN_WORD_COUNT", "300"))
+    dup_threshold = float(os.getenv("SEO_DUP_THRESHOLD", "0.85"))
+    slow_warn_ms = int(os.getenv("SEO_SLOW_WARN_MS", "1000"))
+    slow_err_ms = int(os.getenv("SEO_SLOW_ERR_MS", "3000"))
+    large_warn_bytes = int(os.getenv("SEO_LARGE_WARN_BYTES", "1048576"))
+    large_err_bytes = int(os.getenv("SEO_LARGE_ERR_BYTES", "3145728"))
+
     return {
         "project_root": str(project_root),
         "flaresolverr_url": flaresolverr_url,
@@ -74,6 +86,17 @@ def load_config() -> dict[str, Any]:
         "export_chunk_size": export_chunk_size,
         "archive_format": archive_format,
         "tar_compression": tar_compression,
+        # SEO Audit thresholds
+        "title_min_len": title_min_len,
+        "title_max_len": title_max_len,
+        "desc_min_len": desc_min_len,
+        "desc_max_len": desc_max_len,
+        "min_word_count": min_word_count,
+        "dup_threshold": dup_threshold,
+        "slow_warn_ms": slow_warn_ms,
+        "slow_err_ms": slow_err_ms,
+        "large_warn_bytes": large_warn_bytes,
+        "large_err_bytes": large_err_bytes,
     }
 
 

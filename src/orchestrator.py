@@ -11,10 +11,12 @@ import httpx
 
 from src import scraper
 from src.config import extract_proxy_port
+from src.models import PageTechnicalRecord
 from src.output import OutputManager
 from src.queue import FrontierQueue, create_frontier_queue
+from src.seo_auditor import SEOAuditConfig, detect_duplicate_pages
 from src.session_pool import SessionPool
-from src.sitemap import is_internal_url, normalize_url
+from src.sitemap import is_internal_url
 from src.storage import SQLiteStorage
 
 logger = logging.getLogger(__name__)
@@ -30,11 +32,13 @@ def _process_chunk_worker(
     flaresolverr_url: str,
     fast_http_first: bool,
     max_retries: int,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int, str]:
+    audit_cfg: SEOAuditConfig | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int, str]:
     """Worker function executing a chunk of URLs using a persistent HTTP client and FlareSolverr session."""
     completed_results: list[dict[str, Any]] = []
     retry_targets: list[dict[str, Any]] = []
     discovered_new_urls: list[dict[str, Any]] = []
+    collected_link_edges: list[dict[str, Any]] = []
     errors_encountered = 0
     active_session_id = session_id
     cookie_jar: dict[str, str] = {}
@@ -80,9 +84,10 @@ def _process_chunk_worker(
                 req_job,
                 shared_client=shared_http_client,
                 cookie_jar=cookie_jar if cookie_jar else None,
+                audit_cfg=audit_cfg,
             )
 
-            # Ingest any solved cookies & user-agent from FlareSolverr into shared_http_client
+            # Ingest solved cookies & user-agent from FlareSolverr into shared_http_client
             if res.get("solved_cookies"):
                 for c in res["solved_cookies"]:
                     if isinstance(c, dict) and "name" in c and "value" in c:
@@ -97,6 +102,10 @@ def _process_chunk_worker(
             if success:
                 print(f"  [SUCCESS] (HTTP {status_code}) {target_url}")
                 completed_results.append(res)
+
+                # Collect link edges for link graph
+                if res.get("link_edges"):
+                    collected_link_edges.extend(res["link_edges"])
 
                 # Collect discovered URLs for queue expansion
                 if "internal_urls" in res and target_info.get("mode", "competitor") == "competitor":
@@ -116,7 +125,6 @@ def _process_chunk_worker(
                     print(
                         f"  [RETRY {next_retries} / {max_retries}] (HTTP {status_code}) {target_url} - Recycling session..."
                     )
-                    # Recycle FlareSolverr session if active
                     if active_session_id:
                         scraper.destroy_flaresolverr_session(flaresolverr_url, active_session_id)
                     try:
@@ -137,6 +145,7 @@ def _process_chunk_worker(
         completed_results,
         retry_targets,
         discovered_new_urls,
+        collected_link_edges,
         errors_encountered,
         active_session_id,
     )
@@ -170,6 +179,17 @@ class CrawlerOrchestrator:
         archive_format: str = "none",
         tar_compression: str = "gz",
         enable_competitor: bool = True,
+        # SEO Audit thresholds
+        title_min_len: int = 30,
+        title_max_len: int = 60,
+        desc_min_len: int = 120,
+        desc_max_len: int = 160,
+        min_word_count: int = 300,
+        dup_threshold: float = 0.85,
+        slow_warn_ms: int = 1000,
+        slow_err_ms: int = 3000,
+        large_warn_bytes: int = 1048576,
+        large_err_bytes: int = 3145728,
     ) -> None:
         self.mode = mode
         self.input_path = input_path
@@ -195,6 +215,20 @@ class CrawlerOrchestrator:
         self.export_chunk_size = export_chunk_size
         self.archive_format = archive_format
         self.tar_compression = tar_compression
+
+        # Audit Config
+        self.audit_cfg = SEOAuditConfig(
+            title_min_len=title_min_len,
+            title_max_len=title_max_len,
+            desc_min_len=desc_min_len,
+            desc_max_len=desc_max_len,
+            min_word_count=min_word_count,
+            dup_threshold=dup_threshold,
+            slow_warn_ms=slow_warn_ms,
+            slow_err_ms=slow_err_ms,
+            large_warn_bytes=large_warn_bytes,
+            large_err_bytes=large_err_bytes,
+        )
 
         self.pool = SessionPool(flaresolverr_url)
         db_path = Path(output_dir) / sqlite_db_name
@@ -236,12 +270,10 @@ class CrawlerOrchestrator:
 
     def run(self) -> dict[str, str]:
         """Execute chunked concurrent crawling workflow with SQLite checkpointing and multi-format export."""
-        # Check competitor mode toggle
         if self.mode == "competitor" and not self.enable_competitor:
             print("Competitor mode is currently toggled OFF (ENABLE_COMPETITOR=false). Exiting.")
             return {}
 
-        # Load initial targets
         initial_targets = scraper.load_targets(
             self.mode,
             self.input_path,
@@ -256,11 +288,9 @@ class CrawlerOrchestrator:
         for t in initial_targets:
             t["mode"] = self.mode
 
-        # Check existing completed URLs in SQLite storage to support resume
         completed_urls = self.storage.get_completed_urls(self.mode)
         fresh_targets = [t for t in initial_targets if t.get("url") not in completed_urls]
 
-        # Push to frontier queue
         self.queue.push_targets(fresh_targets)
 
         queue_size = self.queue.size()
@@ -298,12 +328,17 @@ class CrawlerOrchestrator:
 
         with ThreadPoolExecutor(max_workers=effective_concurrency) as executor:
             while (self.queue.has_pending() or in_flight) and processed_count < self.max_pages:
-                # 1. Dispatch chunks into available slots
+                in_flight_pages = sum(m["chunk_size"] for m in in_flight.values())
                 while (
                     len(in_flight) < effective_concurrency
                     and self.queue.has_pending()
-                    and (processed_count + len(in_flight) * self.chunk_size) < self.max_pages
+                    and (processed_count + in_flight_pages) < self.max_pages
                 ):
+                    remaining_budget = self.max_pages - (processed_count + in_flight_pages)
+                    pop_limit = min(self.chunk_size, remaining_budget)
+                    if pop_limit <= 0:
+                        break
+
                     worker_id = next_worker_id
                     next_worker_id = (next_worker_id % 1000) + 1
 
@@ -311,7 +346,7 @@ class CrawlerOrchestrator:
                     if slot_idx < 0:
                         break
 
-                    chunk = self.queue.pop_chunk(self.chunk_size)
+                    chunk = self.queue.pop_chunk(pop_limit)
                     if not chunk:
                         self.pool.release_slot(worker_id, slot_idx)
                         break
@@ -331,14 +366,15 @@ class CrawlerOrchestrator:
                         flaresolverr_url=self.flaresolverr_url,
                         fast_http_first=self.fast_http_first,
                         max_retries=self.max_retries,
+                        audit_cfg=self.audit_cfg,
                     )
                     in_flight[fut] = {
                         "slot_idx": slot_idx,
                         "worker_id": worker_id,
                         "chunk_size": len(chunk),
                     }
+                    in_flight_pages += len(chunk)
 
-                # 2. Sliding window: wait for at least one chunk to finish
                 if in_flight:
                     done_set, _ = wait(
                         list(in_flight.keys()),
@@ -355,21 +391,24 @@ class CrawlerOrchestrator:
                             completed_results,
                             retry_targets,
                             discovered_links,
+                            collected_edges,
                             errors,
                             final_sess_id,
                         ) = fut.result()
 
-                        # Update session pool state
                         if errors > 0:
                             self.pool.record_error(worker_id, slot_idx)
                         self.pool.update_session(worker_id, slot_idx, final_sess_id)
                         self.pool.release_slot(worker_id, slot_idx)
 
-                        # Re-enqueue retry items
                         if retry_targets:
-                            self.queue.push_targets(retry_targets)
+                            self.queue.push_targets(retry_targets, allow_seen=True)
 
-                        # Checkpoint completed results incrementally to SQLite
+                        # Save link edges into SQLite
+                        if collected_edges:
+                            self.storage.save_internal_links_batch(collected_edges)
+
+                        # Checkpoint completed results incrementally
                         for r in completed_results:
                             processed_count += 1
                             if self.mode == "competitor":
@@ -378,6 +417,8 @@ class CrawlerOrchestrator:
                                     domain=self.domain,
                                     depth=r.get("depth", 0),
                                 )
+                                if r.get("issues"):
+                                    self.storage.save_seo_issues_batch(r["issues"])
                             elif self.mode == "citations":
                                 self.storage.save_citation(r.get("result", {}))
                             elif self.mode == "serp":
@@ -388,7 +429,7 @@ class CrawlerOrchestrator:
                             if r.get("evidence"):
                                 self.storage.save_evidence_batch(r["evidence"])
 
-                        # Expand frontier queue with new internal URLs if under max_pages and max_depth
+                        # Expand frontier queue with new internal URLs
                         if (
                             self.mode == "competitor"
                             and discovered_links
@@ -402,6 +443,18 @@ class CrawlerOrchestrator:
                                     valid_new.append(link_info)
                             if valid_new:
                                 self.queue.push_targets(valid_new)
+
+        # Post-Crawl Graph & Duplication Analysis Pass for competitor mode
+        if self.mode == "competitor":
+            print("Analyzing site link graph and checking for near-duplicate pages...")
+            raw_pages = self.storage.fetch_all_pages()
+            page_objs = [PageTechnicalRecord(**p) for p in raw_pages]
+            duplicate_issues = detect_duplicate_pages(
+                page_objs,
+                threshold=self.audit_cfg.dup_threshold,
+            )
+            # Backfill target status, inlinks count, broken outlinks, and duplicate issues in SQLite
+            self.storage.post_crawl_sync(duplicate_issues)
 
         # Export final artifacts from SQLite storage
         meta: dict[str, Any] = {

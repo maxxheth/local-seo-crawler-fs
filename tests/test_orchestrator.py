@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import csv
-import json
 from pathlib import Path
 import tarfile
 from typing import Any
 import zipfile
 
 from src import scraper
-from src.adapters.competitor import CompetitorSiteAdapter
+from src.models import PageTechnicalRecord
 from src.orchestrator import CrawlerOrchestrator
 from src.output import OutputManager
 from src.queue import SQLiteFrontierQueue
+from src.seo_auditor import SEOAuditConfig, audit_page, detect_duplicate_pages
 from src.session_pool import SessionPool, SessionSlot
 from src.sitemap import is_internal_url, normalize_url
 from src.storage import SQLiteStorage
@@ -61,18 +60,36 @@ def test_url_normalization() -> None:
     assert is_internal_url("https://another.com/page", "example.com") is False
 
 
-def test_sqlite_storage(tmp_path: Path) -> None:
+def test_sqlite_storage_and_idempotent_sync(tmp_path: Path) -> None:
     storage = SQLiteStorage(tmp_path / "test.db")
     storage.save_page({"url": "https://example.com/1", "title": "Page 1", "status_code": 200}, domain="example.com")
-    storage.save_page({"url": "https://example.com/2", "title": "Page 2", "status_code": 200}, domain="example.com")
+    storage.save_page({"url": "https://example.com/broken", "title": "404", "status_code": 404}, domain="example.com")
+    storage.save_internal_links_batch([
+        {
+            "source_url": "https://example.com/1",
+            "target_url": "https://example.com/broken",
+            "anchor_text": "Broken Link",
+            "placement": "body",
+            "is_nofollow": False,
+        },
+        {
+            "source_url": "https://example.com/1",
+            "target_url": "https://example.com/broken",
+            "anchor_text": "Duplicate Broken Link",
+            "placement": "footer",
+            "is_nofollow": False,
+        },
+    ])
 
-    completed = storage.get_completed_urls("competitor")
-    assert "https://example.com/1" in completed
-    assert "https://example.com/2" in completed
+    # Run post_crawl_sync twice to verify idempotency and deduplication
+    storage.post_crawl_sync()
+    storage.post_crawl_sync()
 
     pages = storage.fetch_all_pages()
-    assert len(pages) == 2
-    assert pages[0]["title"] == "Page 1"
+    p1 = next(p for p in pages if p["url"] == "https://example.com/1")
+    assert p1["broken_outlinks"] == ["https://example.com/broken"]
+    broken_issues = [i for i in p1.get("issues", []) if i["issue"] == "Broken Internal Link"]
+    assert len(broken_issues) == 1
 
 
 def test_sqlite_frontier_queue(tmp_path: Path) -> None:
@@ -90,6 +107,11 @@ def test_sqlite_frontier_queue(tmp_path: Path) -> None:
     assert len(chunk) == 1
     assert chunk[0]["url"] == "https://example.com/a"
     assert queue.size() == 1
+
+    # Re-enqueueing seen target with allow_seen=True works for retries
+    requeued = queue.push_targets([{"url": "https://example.com/a", "retries": 1}], allow_seen=True)
+    assert requeued == 1
+    assert queue.size() == 2
 
 
 def test_multi_format_and_archive_export(tmp_path: Path) -> None:
@@ -147,6 +169,58 @@ def test_multi_format_and_archive_export(tmp_path: Path) -> None:
         assert "site_crawl_artifact.csv" in znames
 
 
+def test_seo_auditor_rules_and_duplication() -> None:
+    cfg = SEOAuditConfig(
+        title_min_len=20,
+        title_max_len=50,
+        desc_min_len=50,
+        desc_max_len=150,
+        min_word_count=100,
+    )
+
+    page = PageTechnicalRecord(
+        url="https://example.com/bad",
+        title="Short",  # too short
+        meta_description="",  # missing
+        h1=[],  # missing H1
+        word_count=50,  # thin content
+        viewport="",  # missing viewport
+        meta_robots="noindex",  # noindex
+        canonical_url="https://example.com/bad/",  # trailing slash equivalent to url
+        response_time_ms=1500,  # slow
+    )
+    issues = audit_page(page, cfg)
+    issue_names = [i.issue for i in issues]
+    assert "Title Too Short" in issue_names
+    assert "Missing Meta Description" in issue_names
+    assert "Missing H1 Tag" in issue_names
+    assert "Thin Content" in issue_names
+    assert "Noindex Tag Present" in issue_names
+    assert "Missing Viewport Meta Tag" in issue_names
+    assert "Slow Response Time" in issue_names
+    assert "Canonical Points to Different URL" not in issue_names
+
+    # Test Duplicate Detection
+    p1 = PageTechnicalRecord(
+        url="https://example.com/service-dallas",
+        title="Plumbing Service in Dallas TX",
+        meta_description="Fast 24/7 plumbing and emergency rooter services in Dallas.",
+        h1=["Plumbing Dallas"],
+        word_count=350,
+    )
+    p2 = PageTechnicalRecord(
+        url="https://example.com/service-fort-worth",
+        title="Plumbing Service in Dallas TX",  # duplicate title
+        meta_description="Fast 24/7 plumbing and emergency rooter services in Dallas.",
+        h1=["Plumbing Dallas"],
+        word_count=350,
+    )
+    dup_map = detect_duplicate_pages([p1, p2], threshold=0.85)
+    assert "https://example.com/service-dallas" in dup_map
+    assert "https://example.com/service-fort-worth" in dup_map
+    assert dup_map["https://example.com/service-dallas"].category == "Duplication"
+
+
 def test_competitor_mode_toggle_off(tmp_path: Path) -> None:
     orch = CrawlerOrchestrator(
         mode="competitor",
@@ -158,8 +232,9 @@ def test_competitor_mode_toggle_off(tmp_path: Path) -> None:
     assert res == {}
 
 
-def test_orchestrator_chunked_run(monkeypatch: Any, tmp_path: Path) -> None:
+def test_orchestrator_chunked_run_with_retry(monkeypatch: Any, tmp_path: Path) -> None:
     created_sessions: list[str] = []
+    attempt_counts: dict[str, int] = {}
 
     def fake_create_session(base_url: str, proxy_url: str | None = None) -> str:
         sess = f"sess_{len(created_sessions) + 1}"
@@ -170,19 +245,46 @@ def test_orchestrator_chunked_run(monkeypatch: Any, tmp_path: Path) -> None:
         return True
 
     def fake_execute_single_scrape(
-        job: dict[str, Any], shared_client: Any = None, cookie_jar: Any = None
+        job: dict[str, Any], shared_client: Any = None, cookie_jar: Any = None, audit_cfg: Any = None
     ) -> dict[str, Any]:
         u = job["url"]
+        attempt_counts[u] = attempt_counts.get(u, 0) + 1
+
+        # Fail the first attempt on subpage-1 to test retry re-enqueueing and session recycling
+        if u == "https://example.com/subpage-1" and attempt_counts[u] == 1:
+            return {
+                "success": False,
+                "status_code": 503,
+                "error": "Cloudflare challenge",
+                "result": {"url": u, "status_code": 503},
+                "evidence": [],
+            }
+
         return {
             "success": True,
             "status_code": 200,
             "domain": "example.com",
             "depth": 0,
             "internal_urls": ["https://example.com/subpage-1"] if u == "https://example.com/" else [],
+            "link_edges": [
+                {
+                    "source_url": u,
+                    "target_url": "https://example.com/subpage-1",
+                    "anchor_text": "Subpage",
+                    "placement": "navigation",
+                    "is_nofollow": False,
+                }
+            ] if u == "https://example.com/" else [],
+            "issues": [],
             "result": {
                 "url": u,
-                "title": "Title",
+                "title": "Title for " + u,
+                "meta_description": "A valid meta description for testing this page properly.",
+                "h1": ["Heading One"],
+                "word_count": 350,
                 "status_code": 200,
+                "viewport": "width=device-width",
+                "lang": "en",
             },
             "evidence": [],
         }
@@ -196,6 +298,7 @@ def test_orchestrator_chunked_run(monkeypatch: Any, tmp_path: Path) -> None:
         mode="competitor",
         domain="example.com",
         concurrency=2,
+        max_retries=2,
         chunk_size=5,
         max_pages=10,
         max_depth=3,
@@ -206,7 +309,11 @@ def test_orchestrator_chunked_run(monkeypatch: Any, tmp_path: Path) -> None:
     artifacts = orch.run()
 
     assert "site_crawl_artifact" in artifacts
-    # Verify records were saved into SQLite
+    assert attempt_counts["https://example.com/subpage-1"] == 2
     storage = SQLiteStorage(Path(tmp_path) / "crawl_results.db")
     pages = storage.fetch_all_pages()
     assert len(pages) == 2  # homepage and discovered subpage-1
+
+    # Verify link graph post-crawl sync populated inlinks_count
+    subpage = next(p for p in pages if p["url"] == "https://example.com/subpage-1")
+    assert subpage["inlinks_count"] == 1

@@ -47,6 +47,50 @@ class FoundNAP(BaseModel):
     addresses: list[str] = Field(default_factory=list)
 
 
+class ImageAuditSummary(BaseModel):
+    total_images: int = 0
+    missing_alt_count: int = 0
+    decorative_alt_count: int = 0
+    missing_dimensions_count: int = 0
+    missing_alt_sample_urls: list[str] = Field(default_factory=list)
+
+
+class AnalyticsAndTracking(BaseModel):
+    # General Analytics
+    google_analytics: bool = False
+    gtag: bool = False
+    ga4_id: str = ""
+    gtm_id: str = ""
+    facebook_pixel: bool = False
+    hotjar: bool = False
+    mixpanel: bool = False
+    microsoft_clarity: bool = False
+    # Local SEO Call-Tracking & Field Service / Review Widgets
+    callrail: bool = False
+    whatconverts: bool = False
+    servicetitan: bool = False
+    housecall_pro: bool = False
+    podium: bool = False
+    birdeye: bool = False
+
+
+class InternalLinkEdge(BaseModel):
+    source_url: str
+    target_url: str
+    anchor_text: str = ""
+    placement: str = "body"  # "navigation" | "header" | "footer" | "body" | "image"
+    is_nofollow: bool = False
+    target_status: int | None = None
+
+
+class SEOIssue(BaseModel):
+    url: str
+    severity: str  # "error" | "warning" | "info"
+    category: str  # "SEO" | "Content" | "Technical" | "Indexability" | "Mobile" | "Accessibility" | "Social" | "Structured Data" | "Performance" | "Duplication" | "Links"
+    issue: str
+    details: str
+
+
 class PageTechnicalRecord(BaseModel):
     url: str
     final_url: str = ""
@@ -66,11 +110,52 @@ class PageTechnicalRecord(BaseModel):
     nap_found: FoundNAP = Field(default_factory=FoundNAP)
     is_ssr: bool = True
 
+    # General & Local SEO Extensions
+    lang: str = ""
+    charset: str = ""
+    viewport: str = ""
+    meta_robots: str = ""
+    generator: str = ""
+    hreflang: list[dict[str, str]] = Field(default_factory=list)
+    og_tags: dict[str, str] = Field(default_factory=dict)
+    twitter_tags: dict[str, str] = Field(default_factory=dict)
+    response_time_ms: int = 0
+    page_size_bytes: int = 0
+
+    # Sub-Audits
+    images: ImageAuditSummary = Field(default_factory=ImageAuditSummary)
+    analytics: AnalyticsAndTracking = Field(default_factory=AnalyticsAndTracking)
+
+    # Link Graph Rollups
+    inlinks_count: int = 0
+    nofollow_outlinks_count: int = 0
+    link_placements: dict[str, int] = Field(default_factory=dict)
+    broken_outlinks: list[str] = Field(default_factory=list)
+
+    # Automated SEO Issues
+    issues: list[SEOIssue] = Field(default_factory=list)
+
+
+class SiteAuditSummary(BaseModel):
+    total_pages: int = 0
+    total_issues: int = 0
+    errors_count: int = 0
+    warnings_count: int = 0
+    info_count: int = 0
+    duplicate_pages_count: int = 0
+    broken_internal_links_count: int = 0
+    orphan_pages_count: int = 0
+    avg_response_time_ms: float = 0.0
+    cms_generators_detected: list[str] = Field(default_factory=list)
+    analytics_detected: list[str] = Field(default_factory=list)
+    issues_by_category: dict[str, int] = Field(default_factory=dict)
+
 
 class SiteCrawlArtifact(BaseModel):
     target_domain: str
     crawl_depth: int = 1
     pages: list[PageTechnicalRecord] = Field(default_factory=list)
+    audit_summary: SiteAuditSummary = Field(default_factory=SiteAuditSummary)
 
 
 class EvidenceRecord(BaseModel):

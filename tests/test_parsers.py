@@ -172,13 +172,11 @@ def test_citation_adapter_live():
     assert item.proxy_port == 10002
     assert item.confidence == "high"
 
-    # New fields verification
     assert item.website_url == "https://dallaspremierplumber.com"
     assert "Mo-Fr" in item.operating_hours
     assert "(214) 555-0200" in item.secondary_phones
     assert any("BBB Accredited" in b for b in item.badges)
 
-    # Evidence test
     assert evidence.claim_type == "citation_verification"
     assert evidence.http_status == 200
     assert evidence.hash_sha256 == compute_sha256(item.evidence_snippet)
@@ -200,7 +198,7 @@ def test_citation_adapter_blocked():
 
 def test_competitor_site_adapter():
     adapter = CompetitorSiteAdapter()
-    record, evidence_list, discovered_urls = adapter.parse(
+    record, evidence_list, discovered_urls, link_edges = adapter.parse(
         url="https://competitor.com/drain-cleaning-dallas/",
         html=SAMPLE_COMPETITOR_HTML,
         http_status=200,
@@ -219,6 +217,7 @@ def test_competitor_site_adapter():
     assert record.external_outlinks_count == 1
     assert any("service-areas" in u for u in record.internal_urls)
     assert len(discovered_urls) >= 2
+    assert len(link_edges) == 2
     assert "LocalBusiness" in record.schema_types
     assert len(record.nap_found.phones) > 0
     assert len(evidence_list) == 1
@@ -254,7 +253,6 @@ def test_local_serp_adapter():
 def test_output_artifacts_strict_schema(tmp_path: Path):
     mgr = OutputManager(output_dir=str(tmp_path))
 
-    # Test Citation Export
     citation_data = [
         {
             "platform": "yelp",
