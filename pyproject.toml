@@ -1,0 +1,29 @@
+[project]
+name = "local-seo-crawler-fs"
+version = "0.1.0"
+description = "High-throughput concurrent multi-source Local SEO scraper"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.28.1",
+    "scrapling>=0.5",
+    "selectolax>=1.0.2",
+    "beautifulsoup4>=4.15.0",
+    "pydantic>=2.14.0",
+    "rich>=14.0.0",
+    "python-dotenv>=1.0.0",
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+local-seo-crawler = "src.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

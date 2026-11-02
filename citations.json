@@ -1,0 +1,33 @@
+{
+  "business": "Dallas Premier Plumber",
+  "checked_at": "2026-10-27T12:00:00Z",
+  "summary": {
+    "total": 3,
+    "live": 3,
+    "blocked": 0,
+    "mismatch": 0
+  },
+  "citations": [
+    {
+      "platform": "yelp",
+      "label": "Yelp",
+      "url": "https://httpbin.org/status/200",
+      "expected_address": "123 Main St, Dallas, TX 75001",
+      "expected_phone": "(214) 555-0199"
+    },
+    {
+      "platform": "bbb",
+      "label": "Better Business Bureau",
+      "url": "https://httpbin.org/status/200",
+      "expected_address": "123 Main St, Dallas, TX 75001",
+      "expected_phone": "(214) 555-0199"
+    },
+    {
+      "platform": "yellowpages",
+      "label": "YellowPages",
+      "url": "https://httpbin.org/status/200",
+      "expected_address": "123 Main St, Dallas, TX 75001",
+      "expected_phone": "(214) 555-0199"
+    }
+  ]
+}

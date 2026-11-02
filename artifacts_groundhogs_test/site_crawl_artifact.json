@@ -1,0 +1,1423 @@
+{
+  "target_domain": "groundhogstx.com",
+  "crawl_depth": 1,
+  "pages": [
+    {
+      "url": "https://groundhogstx.com/",
+      "final_url": "https://groundhogstx.com/",
+      "status_code": 200,
+      "title": "Groundhogs Services – Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+      "meta_description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+      "canonical_url": "https://groundhogstx.com/",
+      "h1": [
+        "Landscape Installation & Lawn Drainage in Dallas & Mesquite, TX"
+      ],
+      "h2": [
+        "Request a Quote",
+        "Does your landscape love the DFW sun—or is it just surviving?",
+        "Our Services",
+        "Need a landscaping plan before the season gets away from you?",
+        "See Our Work in Action",
+        "Ready to turn a worn-out yard into something worth showing off?",
+        "Quick Links",
+        "Explore",
+        "Social Media"
+      ],
+      "h3": [
+        "Custom Flowerbeds",
+        "Premium Mulch Installation",
+        "Irrigation & Drainage",
+        "Tree & Shrub Care"
+      ],
+      "word_count": 1064,
+      "internal_outlinks_count": 30,
+      "external_outlinks_count": 7,
+      "internal_urls": [
+        "https://groundhogstx.com/",
+        "https://groundhogstx.com/about-us",
+        "https://groundhogstx.com/services",
+        "https://groundhogstx.com/locations/",
+        "https://groundhogstx.com/gallery",
+        "https://groundhogstx.com/careers",
+        "https://groundhogstx.com/blog",
+        "https://groundhogstx.com/contact-us",
+        "https://groundhogstx.com/contact-us/",
+        "https://groundhogstx.com/about-us/",
+        "https://groundhogstx.com/services/",
+        "https://groundhogstx.com/gallery/",
+        "https://groundhogstx.com",
+        "https://groundhogstx.com/careers/"
+      ],
+      "schema_types": [
+        "CollectionPage",
+        "HomeAndConstructionBusiness",
+        "SearchAction",
+        "WebSite"
+      ],
+      "schema_jsonld": [
+        {
+          "@context": "https://schema.org",
+          "@graph": [
+            {
+              "@type": "WebSite",
+              "@id": "https://groundhogstx.com/#website",
+              "url": "https://groundhogstx.com/",
+              "name": "Groundhogs Services",
+              "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+              "inLanguage": "en-US",
+              "potentialAction": {
+                "@id": "https://groundhogstx.com/#searchaction"
+              },
+              "publisher": {
+                "@id": "https://groundhogstx.com/#organization"
+              }
+            },
+            {
+              "@type": "SearchAction",
+              "@id": "https://groundhogstx.com/#searchaction",
+              "target": "https://groundhogstx.com/?s={search_term_string}",
+              "query-input": "required name=search_term_string"
+            },
+            {
+              "@type": "CollectionPage",
+              "@id": "https://groundhogstx.com/#webpage",
+              "url": "https://groundhogstx.com/",
+              "inLanguage": "en-US",
+              "name": "Groundhogs Services – Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+              "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+              "isPartOf": {
+                "@id": "https://groundhogstx.com/#website"
+              },
+              "about": {
+                "@id": "https://groundhogstx.com/#organization"
+              }
+            },
+            {
+              "@type": "HomeAndConstructionBusiness",
+              "@id": "https://groundhogstx.com/#organization",
+              "url": "https://groundhogstx.com/",
+              "name": "Groundhogs Services",
+              "telephone": "+12147131228",
+              "openingHoursSpecification": [
+                {
+                  "@type": "OpeningHoursSpecification",
+                  "dayOfWeek": [
+                    "Monday",
+                    "Tuesday",
+                    "Wednesday",
+                    "Thursday",
+                    "Friday"
+                  ],
+                  "opens": "08:00",
+                  "closes": "17:00"
+                }
+              ],
+              "areaServed": {
+                "@type": "City",
+                "name": "Dallas",
+                "url": "https://groundhogstx.com/locations"
+              },
+              "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "808 Haymarket Rd",
+                "addressLocality": "Dallas",
+                "addressRegion": "TX",
+                "postalCode": "75217",
+                "addressCountry": "US"
+              },
+              "email": "info@groundhogstx.com",
+              "sameAs": [
+                "https://www.facebook.com/groundhogstx",
+                "https://www.instagram.com/groundhogstx/",
+                "https://www.pinterest.com/groundhogstx/",
+                "https://g.page/groundhogstx"
+              ]
+            }
+          ]
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://groundhogstx.com/#website",
+          "url": "https://groundhogstx.com/",
+          "name": "Groundhogs Services",
+          "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+          "inLanguage": "en-US",
+          "potentialAction": {
+            "@id": "https://groundhogstx.com/#searchaction"
+          },
+          "publisher": {
+            "@id": "https://groundhogstx.com/#organization"
+          }
+        },
+        {
+          "@type": "SearchAction",
+          "@id": "https://groundhogstx.com/#searchaction",
+          "target": "https://groundhogstx.com/?s={search_term_string}",
+          "query-input": "required name=search_term_string"
+        },
+        {
+          "@type": "CollectionPage",
+          "@id": "https://groundhogstx.com/#webpage",
+          "url": "https://groundhogstx.com/",
+          "inLanguage": "en-US",
+          "name": "Groundhogs Services – Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+          "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+          "isPartOf": {
+            "@id": "https://groundhogstx.com/#website"
+          },
+          "about": {
+            "@id": "https://groundhogstx.com/#organization"
+          }
+        },
+        {
+          "@type": "HomeAndConstructionBusiness",
+          "@id": "https://groundhogstx.com/#organization",
+          "url": "https://groundhogstx.com/",
+          "name": "Groundhogs Services",
+          "telephone": "+12147131228",
+          "openingHoursSpecification": [
+            {
+              "@type": "OpeningHoursSpecification",
+              "dayOfWeek": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday"
+              ],
+              "opens": "08:00",
+              "closes": "17:00"
+            }
+          ],
+          "areaServed": {
+            "@type": "City",
+            "name": "Dallas",
+            "url": "https://groundhogstx.com/locations"
+          },
+          "address": {
+            "@type": "PostalAddress",
+            "streetAddress": "808 Haymarket Rd",
+            "addressLocality": "Dallas",
+            "addressRegion": "TX",
+            "postalCode": "75217",
+            "addressCountry": "US"
+          },
+          "email": "info@groundhogstx.com",
+          "sameAs": [
+            "https://www.facebook.com/groundhogstx",
+            "https://www.instagram.com/groundhogstx/",
+            "https://www.pinterest.com/groundhogstx/",
+            "https://g.page/groundhogstx"
+          ]
+        }
+      ],
+      "nap_found": {
+        "phones": [
+          "(214) 713-1228",
+          "+12147131228",
+          "2088814092"
+        ],
+        "addresses": []
+      },
+      "is_ssr": true
+    },
+    {
+      "url": "https://groundhogstx.com/about-us",
+      "final_url": "https://groundhogstx.com/about-us/",
+      "status_code": 200,
+      "title": "About Groundhogs Services",
+      "meta_description": "Learn about Groundhogs Services, a family-led landscaping company serving Dallas and surrounding DFW communities with reliable outdoor services.",
+      "canonical_url": "https://groundhogstx.com/about-us/",
+      "h1": [
+        "About Groundhogs Services"
+      ],
+      "h2": [
+        "Built to make North Texas properties look sharper, perform better, and stay easier to maintain.",
+        "We still operate like a company that cares who shows up and how the work holds up.",
+        "What We Stand For",
+        "Ready to Work With a Team That Builds for the Long Term?",
+        "Quick Links",
+        "Explore",
+        "Social Media"
+      ],
+      "h3": [
+        "Excellence",
+        "Integrity",
+        "Sustainability"
+      ],
+      "word_count": 1009,
+      "internal_outlinks_count": 29,
+      "external_outlinks_count": 6,
+      "internal_urls": [
+        "https://groundhogstx.com/",
+        "https://groundhogstx.com/about-us",
+        "https://groundhogstx.com/services",
+        "https://groundhogstx.com/locations/",
+        "https://groundhogstx.com/gallery",
+        "https://groundhogstx.com/careers",
+        "https://groundhogstx.com/blog",
+        "https://groundhogstx.com/contact-us",
+        "https://groundhogstx.com/contact-us/",
+        "https://groundhogstx.com/about-us/",
+        "https://groundhogstx.com/services/",
+        "https://groundhogstx.com/gallery/",
+        "https://groundhogstx.com",
+        "https://groundhogstx.com/careers/"
+      ],
+      "schema_types": [
+        "BreadcrumbList",
+        "HomeAndConstructionBusiness",
+        "ReadAction",
+        "SearchAction",
+        "WebPage",
+        "WebSite"
+      ],
+      "schema_jsonld": [
+        {
+          "@context": "https://schema.org",
+          "@graph": [
+            {
+              "@type": "WebSite",
+              "@id": "https://groundhogstx.com/#website",
+              "url": "https://groundhogstx.com/",
+              "name": "Groundhogs Services",
+              "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+              "inLanguage": "en-US",
+              "potentialAction": {
+                "@id": "https://groundhogstx.com/#searchaction"
+              },
+              "publisher": {
+                "@id": "https://groundhogstx.com/#organization"
+              }
+            },
+            {
+              "@type": "SearchAction",
+              "@id": "https://groundhogstx.com/#searchaction",
+              "target": "https://groundhogstx.com/?s={search_term_string}",
+              "query-input": "required name=search_term_string"
+            },
+            {
+              "@type": "BreadcrumbList",
+              "name": "Breadcrumbs",
+              "@id": "https://groundhogstx.com/about-us/#breadcrumblist",
+              "itemListElement": [
+                {
+                  "@type": "ListItem",
+                  "position": 1,
+                  "name": "Home",
+                  "item": "https://groundhogstx.com/"
+                },
+                {
+                  "@type": "ListItem",
+                  "position": 2,
+                  "name": "About Us"
+                }
+              ]
+            },
+            {
+              "@type": "WebPage",
+              "@id": "https://groundhogstx.com/about-us/#webpage",
+              "url": "https://groundhogstx.com/about-us/",
+              "inLanguage": "en-US",
+              "name": "About Groundhogs Services",
+              "description": "Learn about Groundhogs Services, a family-led landscaping company serving Dallas and surrounding DFW communities with reliable outdoor services.",
+              "datePublished": "2025-03-21T19:51:38+00:00",
+              "dateModified": "2025-03-21T19:52:07+00:00",
+              "isPartOf": {
+                "@id": "https://groundhogstx.com/#website"
+              },
+              "breadcrumb": {
+                "@id": "https://groundhogstx.com/about-us/#breadcrumblist"
+              },
+              "potentialAction": {
+                "@id": "https://groundhogstx.com/about-us/#readaction"
+              }
+            },
+            {
+              "@type": "ReadAction",
+              "@id": "https://groundhogstx.com/about-us/#readaction",
+              "target": "https://groundhogstx.com/about-us/"
+            },
+            {
+              "@type": "HomeAndConstructionBusiness",
+              "@id": "https://groundhogstx.com/#organization",
+              "url": "https://groundhogstx.com/",
+              "name": "Groundhogs Services",
+              "telephone": "+12147131228",
+              "openingHoursSpecification": [
+                {
+                  "@type": "OpeningHoursSpecification",
+                  "dayOfWeek": [
+                    "Monday",
+                    "Tuesday",
+                    "Wednesday",
+                    "Thursday",
+                    "Friday"
+                  ],
+                  "opens": "08:00",
+                  "closes": "17:00"
+                }
+              ],
+              "areaServed": {
+                "@type": "City",
+                "name": "Dallas",
+                "url": "https://groundhogstx.com/locations"
+              },
+              "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "808 Haymarket Rd",
+                "addressLocality": "Dallas",
+                "addressRegion": "TX",
+                "postalCode": "75217",
+                "addressCountry": "US"
+              },
+              "email": "info@groundhogstx.com",
+              "sameAs": [
+                "https://www.facebook.com/groundhogstx",
+                "https://www.instagram.com/groundhogstx/",
+                "https://www.pinterest.com/groundhogstx/",
+                "https://g.page/groundhogstx"
+              ]
+            }
+          ]
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://groundhogstx.com/#website",
+          "url": "https://groundhogstx.com/",
+          "name": "Groundhogs Services",
+          "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+          "inLanguage": "en-US",
+          "potentialAction": {
+            "@id": "https://groundhogstx.com/#searchaction"
+          },
+          "publisher": {
+            "@id": "https://groundhogstx.com/#organization"
+          }
+        },
+        {
+          "@type": "SearchAction",
+          "@id": "https://groundhogstx.com/#searchaction",
+          "target": "https://groundhogstx.com/?s={search_term_string}",
+          "query-input": "required name=search_term_string"
+        },
+        {
+          "@type": "BreadcrumbList",
+          "name": "Breadcrumbs",
+          "@id": "https://groundhogstx.com/about-us/#breadcrumblist",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Home",
+              "item": "https://groundhogstx.com/"
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "About Us"
+            }
+          ]
+        },
+        {
+          "@type": "WebPage",
+          "@id": "https://groundhogstx.com/about-us/#webpage",
+          "url": "https://groundhogstx.com/about-us/",
+          "inLanguage": "en-US",
+          "name": "About Groundhogs Services",
+          "description": "Learn about Groundhogs Services, a family-led landscaping company serving Dallas and surrounding DFW communities with reliable outdoor services.",
+          "datePublished": "2025-03-21T19:51:38+00:00",
+          "dateModified": "2025-03-21T19:52:07+00:00",
+          "isPartOf": {
+            "@id": "https://groundhogstx.com/#website"
+          },
+          "breadcrumb": {
+            "@id": "https://groundhogstx.com/about-us/#breadcrumblist"
+          },
+          "potentialAction": {
+            "@id": "https://groundhogstx.com/about-us/#readaction"
+          }
+        },
+        {
+          "@type": "ReadAction",
+          "@id": "https://groundhogstx.com/about-us/#readaction",
+          "target": "https://groundhogstx.com/about-us/"
+        },
+        {
+          "@type": "HomeAndConstructionBusiness",
+          "@id": "https://groundhogstx.com/#organization",
+          "url": "https://groundhogstx.com/",
+          "name": "Groundhogs Services",
+          "telephone": "+12147131228",
+          "openingHoursSpecification": [
+            {
+              "@type": "OpeningHoursSpecification",
+              "dayOfWeek": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday"
+              ],
+              "opens": "08:00",
+              "closes": "17:00"
+            }
+          ],
+          "areaServed": {
+            "@type": "City",
+            "name": "Dallas",
+            "url": "https://groundhogstx.com/locations"
+          },
+          "address": {
+            "@type": "PostalAddress",
+            "streetAddress": "808 Haymarket Rd",
+            "addressLocality": "Dallas",
+            "addressRegion": "TX",
+            "postalCode": "75217",
+            "addressCountry": "US"
+          },
+          "email": "info@groundhogstx.com",
+          "sameAs": [
+            "https://www.facebook.com/groundhogstx",
+            "https://www.instagram.com/groundhogstx/",
+            "https://www.pinterest.com/groundhogstx/",
+            "https://g.page/groundhogstx"
+          ]
+        }
+      ],
+      "nap_found": {
+        "phones": [
+          "(214) 713-1228",
+          "+12147131228",
+          "2088814092"
+        ],
+        "addresses": []
+      },
+      "is_ssr": true
+    },
+    {
+      "url": "https://groundhogstx.com/locations/",
+      "final_url": "https://groundhogstx.com/locations/",
+      "status_code": 200,
+      "title": "Dallas and DFW Service Areas",
+      "meta_description": "Groundhogs Services provides landscaping, irrigation, drainage, and outdoor curb-appeal services in Dallas, Mesquite, and surrounding DFW communities.",
+      "canonical_url": "https://groundhogstx.com/locations/",
+      "h1": [
+        "Locations"
+      ],
+      "h2": [
+        "Jump to related topics or start a new search.",
+        "Discover more from the blog hub",
+        "Professional Landscaping Services in Seagoville, TX",
+        "Professional Landscaping Services in Rockwall, TX",
+        "Custom Hardscaping & Estate Lawn Management in Heath, TX",
+        "Lakeside Landscaping Services in Rowlett, TX",
+        "Professional Landscaping Services in Garland, TX",
+        "Residential Landscaping & New Sod Installation in Forney, TX",
+        "Professional Landscaping Services in Balch Springs, TX",
+        "Luxury Landscape Design & Maintenance in Sunnyvale, TX",
+        "Professional Landscaping & Lawn Care Services in Mesquite, TX",
+        "Quick Links",
+        "Explore",
+        "Social Media"
+      ],
+      "h3": [],
+      "word_count": 1081,
+      "internal_outlinks_count": 61,
+      "external_outlinks_count": 6,
+      "internal_urls": [
+        "https://groundhogstx.com/",
+        "https://groundhogstx.com/about-us",
+        "https://groundhogstx.com/services",
+        "https://groundhogstx.com/locations/",
+        "https://groundhogstx.com/gallery",
+        "https://groundhogstx.com/careers",
+        "https://groundhogstx.com/blog",
+        "https://groundhogstx.com/contact-us",
+        "https://groundhogstx.com/category/climate-adaptation/",
+        "https://groundhogstx.com/category/dfw-landscaping/foundation-protection/",
+        "https://groundhogstx.com/category/water-management/",
+        "https://groundhogstx.com/category/landscaping-basics/",
+        "https://groundhogstx.com/category/plant-selection/",
+        "https://groundhogstx.com/category/lawn-care/",
+        "https://groundhogstx.com/locations/professional-landscaping-services-in-seagoville-tx/",
+        "https://groundhogstx.com/locations/pro-landscaping-rockwall-tx/",
+        "https://groundhogstx.com/locations/custom-hardscaping-estate-lawn-management-in-heath-tx/",
+        "https://groundhogstx.com/locations/lakeside-landscaping-rowlett-tx/",
+        "https://groundhogstx.com/locations/pro-landscaping-garland-tx/",
+        "https://groundhogstx.com/locations/residential-landscaping-forney-tx/",
+        "https://groundhogstx.com/locations/professional-landscaping-services-in-balch-springs-tx/",
+        "https://groundhogstx.com/locations/luxury-landscaping-sunnyvale-tx/",
+        "https://groundhogstx.com/locations/professional-landscaping-lawn-care-services-in-mesquite-tx/",
+        "https://groundhogstx.com/contact-us/",
+        "https://groundhogstx.com/about-us/",
+        "https://groundhogstx.com/services/",
+        "https://groundhogstx.com/gallery/",
+        "https://groundhogstx.com",
+        "https://groundhogstx.com/careers/"
+      ],
+      "schema_types": [
+        "BreadcrumbList",
+        "CollectionPage",
+        "HomeAndConstructionBusiness",
+        "SearchAction",
+        "WebSite"
+      ],
+      "schema_jsonld": [
+        {
+          "@context": "https://schema.org",
+          "@graph": [
+            {
+              "@type": "WebSite",
+              "@id": "https://groundhogstx.com/#website",
+              "url": "https://groundhogstx.com/",
+              "name": "Groundhogs Services",
+              "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+              "inLanguage": "en-US",
+              "potentialAction": {
+                "@id": "https://groundhogstx.com/#searchaction"
+              },
+              "publisher": {
+                "@id": "https://groundhogstx.com/#organization"
+              }
+            },
+            {
+              "@type": "SearchAction",
+              "@id": "https://groundhogstx.com/#searchaction",
+              "target": "https://groundhogstx.com/?s={search_term_string}",
+              "query-input": "required name=search_term_string"
+            },
+            {
+              "@type": "BreadcrumbList",
+              "name": "Breadcrumbs",
+              "@id": "https://groundhogstx.com/locations/#breadcrumblist",
+              "itemListElement": [
+                {
+                  "@type": "ListItem",
+                  "position": 1,
+                  "name": "Home",
+                  "item": "https://groundhogstx.com/"
+                },
+                {
+                  "@type": "ListItem",
+                  "position": 2,
+                  "name": "Locations"
+                }
+              ]
+            },
+            {
+              "@type": "CollectionPage",
+              "@id": "https://groundhogstx.com/locations/#webpage",
+              "url": "https://groundhogstx.com/locations/",
+              "inLanguage": "en-US",
+              "name": "Dallas and DFW Service Areas",
+              "description": "Groundhogs Services provides landscaping, irrigation, drainage, and outdoor curb-appeal services in Dallas, Mesquite, and surrounding DFW communities.",
+              "isPartOf": {
+                "@id": "https://groundhogstx.com/#website"
+              },
+              "breadcrumb": {
+                "@id": "https://groundhogstx.com/locations/#breadcrumblist"
+              }
+            },
+            {
+              "@type": "HomeAndConstructionBusiness",
+              "@id": "https://groundhogstx.com/#organization",
+              "url": "https://groundhogstx.com/",
+              "name": "Groundhogs Services",
+              "telephone": "+12147131228",
+              "openingHoursSpecification": [
+                {
+                  "@type": "OpeningHoursSpecification",
+                  "dayOfWeek": [
+                    "Monday",
+                    "Tuesday",
+                    "Wednesday",
+                    "Thursday",
+                    "Friday"
+                  ],
+                  "opens": "08:00",
+                  "closes": "17:00"
+                }
+              ],
+              "areaServed": {
+                "@type": "City",
+                "name": "Dallas",
+                "url": "https://groundhogstx.com/locations"
+              },
+              "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "808 Haymarket Rd",
+                "addressLocality": "Dallas",
+                "addressRegion": "TX",
+                "postalCode": "75217",
+                "addressCountry": "US"
+              },
+              "email": "info@groundhogstx.com",
+              "sameAs": [
+                "https://www.facebook.com/groundhogstx",
+                "https://www.instagram.com/groundhogstx/",
+                "https://www.pinterest.com/groundhogstx/",
+                "https://g.page/groundhogstx"
+              ]
+            }
+          ]
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://groundhogstx.com/#website",
+          "url": "https://groundhogstx.com/",
+          "name": "Groundhogs Services",
+          "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+          "inLanguage": "en-US",
+          "potentialAction": {
+            "@id": "https://groundhogstx.com/#searchaction"
+          },
+          "publisher": {
+            "@id": "https://groundhogstx.com/#organization"
+          }
+        },
+        {
+          "@type": "SearchAction",
+          "@id": "https://groundhogstx.com/#searchaction",
+          "target": "https://groundhogstx.com/?s={search_term_string}",
+          "query-input": "required name=search_term_string"
+        },
+        {
+          "@type": "BreadcrumbList",
+          "name": "Breadcrumbs",
+          "@id": "https://groundhogstx.com/locations/#breadcrumblist",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Home",
+              "item": "https://groundhogstx.com/"
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Locations"
+            }
+          ]
+        },
+        {
+          "@type": "CollectionPage",
+          "@id": "https://groundhogstx.com/locations/#webpage",
+          "url": "https://groundhogstx.com/locations/",
+          "inLanguage": "en-US",
+          "name": "Dallas and DFW Service Areas",
+          "description": "Groundhogs Services provides landscaping, irrigation, drainage, and outdoor curb-appeal services in Dallas, Mesquite, and surrounding DFW communities.",
+          "isPartOf": {
+            "@id": "https://groundhogstx.com/#website"
+          },
+          "breadcrumb": {
+            "@id": "https://groundhogstx.com/locations/#breadcrumblist"
+          }
+        },
+        {
+          "@type": "HomeAndConstructionBusiness",
+          "@id": "https://groundhogstx.com/#organization",
+          "url": "https://groundhogstx.com/",
+          "name": "Groundhogs Services",
+          "telephone": "+12147131228",
+          "openingHoursSpecification": [
+            {
+              "@type": "OpeningHoursSpecification",
+              "dayOfWeek": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday"
+              ],
+              "opens": "08:00",
+              "closes": "17:00"
+            }
+          ],
+          "areaServed": {
+            "@type": "City",
+            "name": "Dallas",
+            "url": "https://groundhogstx.com/locations"
+          },
+          "address": {
+            "@type": "PostalAddress",
+            "streetAddress": "808 Haymarket Rd",
+            "addressLocality": "Dallas",
+            "addressRegion": "TX",
+            "postalCode": "75217",
+            "addressCountry": "US"
+          },
+          "email": "info@groundhogstx.com",
+          "sameAs": [
+            "https://www.facebook.com/groundhogstx",
+            "https://www.instagram.com/groundhogstx/",
+            "https://www.pinterest.com/groundhogstx/",
+            "https://g.page/groundhogstx"
+          ]
+        }
+      ],
+      "nap_found": {
+        "phones": [
+          "(214) 713-1228",
+          "+12147131228",
+          "2088814092"
+        ],
+        "addresses": []
+      },
+      "is_ssr": true
+    },
+    {
+      "url": "https://groundhogstx.com/gallery",
+      "final_url": "https://groundhogstx.com/gallery/",
+      "status_code": 200,
+      "title": "Groundhogs Services Project Gallery",
+      "meta_description": "View landscaping, flowerbed, mulch, irrigation, and outdoor improvement projects from Groundhogs Services in the Dallas-Fort Worth area.",
+      "canonical_url": "https://groundhogstx.com/gallery/",
+      "h1": [
+        "A Gallery Of Our Top Projects"
+      ],
+      "h2": [
+        "Commercial Landscaping Portfolio: See Our Work.",
+        "Recent Project Highlights",
+        "Want Results Like These on Your Property?",
+        "Quick Links",
+        "Explore",
+        "Social Media"
+      ],
+      "h3": [],
+      "word_count": 891,
+      "internal_outlinks_count": 91,
+      "external_outlinks_count": 6,
+      "internal_urls": [
+        "https://groundhogstx.com/",
+        "https://groundhogstx.com/about-us",
+        "https://groundhogstx.com/services",
+        "https://groundhogstx.com/locations/",
+        "https://groundhogstx.com/gallery",
+        "https://groundhogstx.com/careers",
+        "https://groundhogstx.com/blog",
+        "https://groundhogstx.com/contact-us",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/1-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/10-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/11-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/12.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/13.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/14-1920w.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/3-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/5-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/6-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/7-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/8-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/9-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/DSC_0215.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_0067+2.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_0068-1920w.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_0271.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_0568.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1171.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1184-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1191-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1542-1920w.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1543-1920w.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1545-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1547.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1549.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1661-1920w.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1662-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1671.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1672-1920w.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1682.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1683-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1717-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1718.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_1719.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_2343.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_2344.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_2366.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_5160-1920w.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_5168.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_5189-1600h.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_5198-1920w.webp",
+        "https://groundhogstx.com/app/themes/sage/resources/images/gallery/IMG_5201.webp"
+      ],
+      "schema_types": [
+        "BreadcrumbList",
+        "HomeAndConstructionBusiness",
+        "ReadAction",
+        "SearchAction",
+        "WebPage",
+        "WebSite"
+      ],
+      "schema_jsonld": [
+        {
+          "@context": "https://schema.org",
+          "@graph": [
+            {
+              "@type": "WebSite",
+              "@id": "https://groundhogstx.com/#website",
+              "url": "https://groundhogstx.com/",
+              "name": "Groundhogs Services",
+              "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+              "inLanguage": "en-US",
+              "potentialAction": {
+                "@id": "https://groundhogstx.com/#searchaction"
+              },
+              "publisher": {
+                "@id": "https://groundhogstx.com/#organization"
+              }
+            },
+            {
+              "@type": "SearchAction",
+              "@id": "https://groundhogstx.com/#searchaction",
+              "target": "https://groundhogstx.com/?s={search_term_string}",
+              "query-input": "required name=search_term_string"
+            },
+            {
+              "@type": "BreadcrumbList",
+              "name": "Breadcrumbs",
+              "@id": "https://groundhogstx.com/gallery/#breadcrumblist",
+              "itemListElement": [
+                {
+                  "@type": "ListItem",
+                  "position": 1,
+                  "name": "Home",
+                  "item": "https://groundhogstx.com/"
+                },
+                {
+                  "@type": "ListItem",
+                  "position": 2,
+                  "name": "A Gallery Of Our Top Projects"
+                }
+              ]
+            },
+            {
+              "@type": "WebPage",
+              "@id": "https://groundhogstx.com/gallery/#webpage",
+              "url": "https://groundhogstx.com/gallery/",
+              "inLanguage": "en-US",
+              "name": "Groundhogs Services Project Gallery",
+              "description": "View landscaping, flowerbed, mulch, irrigation, and outdoor improvement projects from Groundhogs Services in the Dallas-Fort Worth area.",
+              "datePublished": "2025-04-06T18:27:05+00:00",
+              "dateModified": "2025-04-15T18:01:01+00:00",
+              "isPartOf": {
+                "@id": "https://groundhogstx.com/#website"
+              },
+              "breadcrumb": {
+                "@id": "https://groundhogstx.com/gallery/#breadcrumblist"
+              },
+              "potentialAction": {
+                "@id": "https://groundhogstx.com/gallery/#readaction"
+              }
+            },
+            {
+              "@type": "ReadAction",
+              "@id": "https://groundhogstx.com/gallery/#readaction",
+              "target": "https://groundhogstx.com/gallery/"
+            },
+            {
+              "@type": "HomeAndConstructionBusiness",
+              "@id": "https://groundhogstx.com/#organization",
+              "url": "https://groundhogstx.com/",
+              "name": "Groundhogs Services",
+              "telephone": "+12147131228",
+              "openingHoursSpecification": [
+                {
+                  "@type": "OpeningHoursSpecification",
+                  "dayOfWeek": [
+                    "Monday",
+                    "Tuesday",
+                    "Wednesday",
+                    "Thursday",
+                    "Friday"
+                  ],
+                  "opens": "08:00",
+                  "closes": "17:00"
+                }
+              ],
+              "areaServed": {
+                "@type": "City",
+                "name": "Dallas",
+                "url": "https://groundhogstx.com/locations"
+              },
+              "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "808 Haymarket Rd",
+                "addressLocality": "Dallas",
+                "addressRegion": "TX",
+                "postalCode": "75217",
+                "addressCountry": "US"
+              },
+              "email": "info@groundhogstx.com",
+              "sameAs": [
+                "https://www.facebook.com/groundhogstx",
+                "https://www.instagram.com/groundhogstx/",
+                "https://www.pinterest.com/groundhogstx/",
+                "https://g.page/groundhogstx"
+              ]
+            }
+          ]
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://groundhogstx.com/#website",
+          "url": "https://groundhogstx.com/",
+          "name": "Groundhogs Services",
+          "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+          "inLanguage": "en-US",
+          "potentialAction": {
+            "@id": "https://groundhogstx.com/#searchaction"
+          },
+          "publisher": {
+            "@id": "https://groundhogstx.com/#organization"
+          }
+        },
+        {
+          "@type": "SearchAction",
+          "@id": "https://groundhogstx.com/#searchaction",
+          "target": "https://groundhogstx.com/?s={search_term_string}",
+          "query-input": "required name=search_term_string"
+        },
+        {
+          "@type": "BreadcrumbList",
+          "name": "Breadcrumbs",
+          "@id": "https://groundhogstx.com/gallery/#breadcrumblist",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Home",
+              "item": "https://groundhogstx.com/"
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "A Gallery Of Our Top Projects"
+            }
+          ]
+        },
+        {
+          "@type": "WebPage",
+          "@id": "https://groundhogstx.com/gallery/#webpage",
+          "url": "https://groundhogstx.com/gallery/",
+          "inLanguage": "en-US",
+          "name": "Groundhogs Services Project Gallery",
+          "description": "View landscaping, flowerbed, mulch, irrigation, and outdoor improvement projects from Groundhogs Services in the Dallas-Fort Worth area.",
+          "datePublished": "2025-04-06T18:27:05+00:00",
+          "dateModified": "2025-04-15T18:01:01+00:00",
+          "isPartOf": {
+            "@id": "https://groundhogstx.com/#website"
+          },
+          "breadcrumb": {
+            "@id": "https://groundhogstx.com/gallery/#breadcrumblist"
+          },
+          "potentialAction": {
+            "@id": "https://groundhogstx.com/gallery/#readaction"
+          }
+        },
+        {
+          "@type": "ReadAction",
+          "@id": "https://groundhogstx.com/gallery/#readaction",
+          "target": "https://groundhogstx.com/gallery/"
+        },
+        {
+          "@type": "HomeAndConstructionBusiness",
+          "@id": "https://groundhogstx.com/#organization",
+          "url": "https://groundhogstx.com/",
+          "name": "Groundhogs Services",
+          "telephone": "+12147131228",
+          "openingHoursSpecification": [
+            {
+              "@type": "OpeningHoursSpecification",
+              "dayOfWeek": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday"
+              ],
+              "opens": "08:00",
+              "closes": "17:00"
+            }
+          ],
+          "areaServed": {
+            "@type": "City",
+            "name": "Dallas",
+            "url": "https://groundhogstx.com/locations"
+          },
+          "address": {
+            "@type": "PostalAddress",
+            "streetAddress": "808 Haymarket Rd",
+            "addressLocality": "Dallas",
+            "addressRegion": "TX",
+            "postalCode": "75217",
+            "addressCountry": "US"
+          },
+          "email": "info@groundhogstx.com",
+          "sameAs": [
+            "https://www.facebook.com/groundhogstx",
+            "https://www.instagram.com/groundhogstx/",
+            "https://www.pinterest.com/groundhogstx/",
+            "https://g.page/groundhogstx"
+          ]
+        }
+      ],
+      "nap_found": {
+        "phones": [
+          "(214) 713-1228",
+          "+12147131228",
+          "2088814092"
+        ],
+        "addresses": []
+      },
+      "is_ssr": true
+    },
+    {
+      "url": "https://groundhogstx.com/services",
+      "final_url": "https://groundhogstx.com/services/",
+      "status_code": 200,
+      "title": "Landscaping Services in Dallas and DFW",
+      "meta_description": "Explore landscaping services from Groundhogs Services, including flowerbeds, mulch, irrigation, drainage, sod, and tree and shrub care across Dallas and DFW.",
+      "canonical_url": "https://groundhogstx.com/services/",
+      "h1": [
+        "Services"
+      ],
+      "h2": [
+        "Does your property need one landscaping partner that can handle it all?",
+        "Our complete services",
+        "Frequently asked questions",
+        "Ready to transform your landscape?",
+        "Quick Links",
+        "Explore",
+        "Social Media"
+      ],
+      "h3": [
+        "Landscape Gardener",
+        "Driveway landscaping",
+        "Driveway or path paving",
+        "Garden decorating",
+        "Gardening services",
+        "Garden landscaping",
+        "Garden levelling",
+        "Grading and resloping",
+        "Grass seeding",
+        "Green landscaping",
+        "Hardscaping",
+        "Landscape design",
+        "Landscape installations",
+        "Landscape management",
+        "Landscaping design",
+        "Landscaping maintenance",
+        "Lawn care",
+        "Lawn landscaping",
+        "Path landscaping",
+        "Pool landscaping",
+        "Rock landscaping",
+        "Sod installation",
+        "Stone landscaping",
+        "Tree landscaping"
+      ],
+      "word_count": 1905,
+      "internal_outlinks_count": 77,
+      "external_outlinks_count": 6,
+      "internal_urls": [
+        "https://groundhogstx.com/",
+        "https://groundhogstx.com/about-us",
+        "https://groundhogstx.com/services",
+        "https://groundhogstx.com/locations/",
+        "https://groundhogstx.com/gallery",
+        "https://groundhogstx.com/careers",
+        "https://groundhogstx.com/blog",
+        "https://groundhogstx.com/contact-us",
+        "https://groundhogstx.com/contact-us/",
+        "https://groundhogstx.com/service/landscape-gardener/",
+        "https://groundhogstx.com/service/driveway-landscaping/",
+        "https://groundhogstx.com/service/driveway-or-path-paving/",
+        "https://groundhogstx.com/service/garden-decorating/",
+        "https://groundhogstx.com/service/gardening-services/",
+        "https://groundhogstx.com/service/garden-landscaping/",
+        "https://groundhogstx.com/service/garden-levelling/",
+        "https://groundhogstx.com/service/grading-and-resloping/",
+        "https://groundhogstx.com/service/grass-seeding/",
+        "https://groundhogstx.com/service/green-landscaping/",
+        "https://groundhogstx.com/service/hardscaping/",
+        "https://groundhogstx.com/service/landscape-design/",
+        "https://groundhogstx.com/service/landscape-installations/",
+        "https://groundhogstx.com/service/landscape-management/",
+        "https://groundhogstx.com/service/landscaping-design/",
+        "https://groundhogstx.com/service/landscaping-maintenance/",
+        "https://groundhogstx.com/service/lawn-care/",
+        "https://groundhogstx.com/service/lawn-landscaping/",
+        "https://groundhogstx.com/service/path-landscaping/",
+        "https://groundhogstx.com/service/pool-landscaping/",
+        "https://groundhogstx.com/service/rock-landscaping/",
+        "https://groundhogstx.com/service/sod-installation/",
+        "https://groundhogstx.com/service/stone-landscaping/",
+        "https://groundhogstx.com/service/tree-landscaping/",
+        "https://groundhogstx.com/about-us/",
+        "https://groundhogstx.com/services/",
+        "https://groundhogstx.com/gallery/",
+        "https://groundhogstx.com",
+        "https://groundhogstx.com/careers/"
+      ],
+      "schema_types": [
+        "BreadcrumbList",
+        "HomeAndConstructionBusiness",
+        "ImageObject",
+        "ReadAction",
+        "SearchAction",
+        "WebPage",
+        "WebSite"
+      ],
+      "schema_jsonld": [
+        {
+          "@context": "https://schema.org",
+          "@graph": [
+            {
+              "@type": "WebSite",
+              "@id": "https://groundhogstx.com/#website",
+              "url": "https://groundhogstx.com/",
+              "name": "Groundhogs Services",
+              "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+              "inLanguage": "en-US",
+              "potentialAction": {
+                "@id": "https://groundhogstx.com/#searchaction"
+              },
+              "publisher": {
+                "@id": "https://groundhogstx.com/#organization"
+              }
+            },
+            {
+              "@type": "SearchAction",
+              "@id": "https://groundhogstx.com/#searchaction",
+              "target": "https://groundhogstx.com/?s={search_term_string}",
+              "query-input": "required name=search_term_string"
+            },
+            {
+              "@type": "BreadcrumbList",
+              "name": "Breadcrumbs",
+              "@id": "https://groundhogstx.com/services/#breadcrumblist",
+              "itemListElement": [
+                {
+                  "@type": "ListItem",
+                  "position": 1,
+                  "name": "Home",
+                  "item": "https://groundhogstx.com/"
+                },
+                {
+                  "@type": "ListItem",
+                  "position": 2,
+                  "name": "Services"
+                }
+              ]
+            },
+            {
+              "@type": "WebPage",
+              "@id": "https://groundhogstx.com/services/#webpage",
+              "url": "https://groundhogstx.com/services/",
+              "inLanguage": "en-US",
+              "name": "Landscaping Services in Dallas and DFW",
+              "description": "Explore landscaping services from Groundhogs Services, including flowerbeds, mulch, irrigation, drainage, sod, and tree and shrub care across Dallas and DFW.",
+              "datePublished": "2025-03-21T20:45:42+00:00",
+              "dateModified": "2026-01-20T00:10:35+00:00",
+              "isPartOf": {
+                "@id": "https://groundhogstx.com/#website"
+              },
+              "breadcrumb": {
+                "@id": "https://groundhogstx.com/services/#breadcrumblist"
+              },
+              "potentialAction": {
+                "@id": "https://groundhogstx.com/services/#readaction"
+              },
+              "primaryImageOfPage": {
+                "@id": "https://groundhogstx.com/services/#thumbnail"
+              },
+              "image": {
+                "@id": "https://groundhogstx.com/services/#thumbnail"
+              }
+            },
+            {
+              "@type": "ReadAction",
+              "@id": "https://groundhogstx.com/services/#readaction",
+              "target": "https://groundhogstx.com/services/"
+            },
+            {
+              "@type": "HomeAndConstructionBusiness",
+              "@id": "https://groundhogstx.com/#organization",
+              "url": "https://groundhogstx.com/",
+              "name": "Groundhogs Services",
+              "telephone": "+12147131228",
+              "openingHoursSpecification": [
+                {
+                  "@type": "OpeningHoursSpecification",
+                  "dayOfWeek": [
+                    "Monday",
+                    "Tuesday",
+                    "Wednesday",
+                    "Thursday",
+                    "Friday"
+                  ],
+                  "opens": "08:00",
+                  "closes": "17:00"
+                }
+              ],
+              "areaServed": {
+                "@type": "City",
+                "name": "Dallas",
+                "url": "https://groundhogstx.com/locations"
+              },
+              "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "808 Haymarket Rd",
+                "addressLocality": "Dallas",
+                "addressRegion": "TX",
+                "postalCode": "75217",
+                "addressCountry": "US"
+              },
+              "email": "info@groundhogstx.com",
+              "sameAs": [
+                "https://www.facebook.com/groundhogstx",
+                "https://www.instagram.com/groundhogstx/",
+                "https://www.pinterest.com/groundhogstx/",
+                "https://g.page/groundhogstx"
+              ]
+            },
+            {
+              "@type": "ImageObject",
+              "@id": "https://groundhogstx.com/services/#thumbnail",
+              "url": "https://groundhogstx.com/app/uploads/2026/01/flower-bed-design-hero.png",
+              "contentUrl": "https://groundhogstx.com/app/uploads/2026/01/flower-bed-design-hero.png",
+              "width": 1024,
+              "height": 1024
+            }
+          ]
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://groundhogstx.com/#website",
+          "url": "https://groundhogstx.com/",
+          "name": "Groundhogs Services",
+          "description": "Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities.",
+          "inLanguage": "en-US",
+          "potentialAction": {
+            "@id": "https://groundhogstx.com/#searchaction"
+          },
+          "publisher": {
+            "@id": "https://groundhogstx.com/#organization"
+          }
+        },
+        {
+          "@type": "SearchAction",
+          "@id": "https://groundhogstx.com/#searchaction",
+          "target": "https://groundhogstx.com/?s={search_term_string}",
+          "query-input": "required name=search_term_string"
+        },
+        {
+          "@type": "BreadcrumbList",
+          "name": "Breadcrumbs",
+          "@id": "https://groundhogstx.com/services/#breadcrumblist",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Home",
+              "item": "https://groundhogstx.com/"
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Services"
+            }
+          ]
+        },
+        {
+          "@type": "WebPage",
+          "@id": "https://groundhogstx.com/services/#webpage",
+          "url": "https://groundhogstx.com/services/",
+          "inLanguage": "en-US",
+          "name": "Landscaping Services in Dallas and DFW",
+          "description": "Explore landscaping services from Groundhogs Services, including flowerbeds, mulch, irrigation, drainage, sod, and tree and shrub care across Dallas and DFW.",
+          "datePublished": "2025-03-21T20:45:42+00:00",
+          "dateModified": "2026-01-20T00:10:35+00:00",
+          "isPartOf": {
+            "@id": "https://groundhogstx.com/#website"
+          },
+          "breadcrumb": {
+            "@id": "https://groundhogstx.com/services/#breadcrumblist"
+          },
+          "potentialAction": {
+            "@id": "https://groundhogstx.com/services/#readaction"
+          },
+          "primaryImageOfPage": {
+            "@id": "https://groundhogstx.com/services/#thumbnail"
+          },
+          "image": {
+            "@id": "https://groundhogstx.com/services/#thumbnail"
+          }
+        },
+        {
+          "@type": "ReadAction",
+          "@id": "https://groundhogstx.com/services/#readaction",
+          "target": "https://groundhogstx.com/services/"
+        },
+        {
+          "@type": "HomeAndConstructionBusiness",
+          "@id": "https://groundhogstx.com/#organization",
+          "url": "https://groundhogstx.com/",
+          "name": "Groundhogs Services",
+          "telephone": "+12147131228",
+          "openingHoursSpecification": [
+            {
+              "@type": "OpeningHoursSpecification",
+              "dayOfWeek": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday"
+              ],
+              "opens": "08:00",
+              "closes": "17:00"
+            }
+          ],
+          "areaServed": {
+            "@type": "City",
+            "name": "Dallas",
+            "url": "https://groundhogstx.com/locations"
+          },
+          "address": {
+            "@type": "PostalAddress",
+            "streetAddress": "808 Haymarket Rd",
+            "addressLocality": "Dallas",
+            "addressRegion": "TX",
+            "postalCode": "75217",
+            "addressCountry": "US"
+          },
+          "email": "info@groundhogstx.com",
+          "sameAs": [
+            "https://www.facebook.com/groundhogstx",
+            "https://www.instagram.com/groundhogstx/",
+            "https://www.pinterest.com/groundhogstx/",
+            "https://g.page/groundhogstx"
+          ]
+        },
+        {
+          "@type": "ImageObject",
+          "@id": "https://groundhogstx.com/services/#thumbnail",
+          "url": "https://groundhogstx.com/app/uploads/2026/01/flower-bed-design-hero.png",
+          "contentUrl": "https://groundhogstx.com/app/uploads/2026/01/flower-bed-design-hero.png",
+          "width": 1024,
+          "height": 1024
+        }
+      ],
+      "nap_found": {
+        "phones": [
+          "(214) 713-1228",
+          "+12147131228",
+          "2088814092"
+        ],
+        "addresses": []
+      },
+      "is_ssr": true
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "manifest_id": "evd_20261027_182149",
+  "records": [
+    {
+      "claim_type": "technical_page_audit",
+      "source_url": "https://groundhogstx.com/",
+      "timestamp": "2026-10-27T18:21:13.489002+00:00",
+      "http_status": 200,
+      "dom_selector": "head > title",
+      "verbatim_text": "Title: Groundhogs Services – Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities. | Words: 1064 | H1s: 1 | Canonical: https://groundhogstx.com/",
+      "hash_sha256": "9cd638cc9bae627563c380aa4c00655d9d12e7e719d96287543e49df9fac457a"
+    },
+    {
+      "claim_type": "technical_page_audit",
+      "source_url": "https://groundhogstx.com/about-us/",
+      "timestamp": "2026-10-27T18:21:14.862479+00:00",
+      "http_status": 200,
+      "dom_selector": "head > title",
+      "verbatim_text": "Title: About Groundhogs Services | Words: 1009 | H1s: 1 | Canonical: https://groundhogstx.com/about-us/",
+      "hash_sha256": "1e2bc9d4579f1398a8a05bafe88966146f2be97bfc40f1f0f36e7e5337c1fab6"
+    },
+    {
+      "claim_type": "technical_page_audit",
+      "source_url": "https://groundhogstx.com/services/",
+      "timestamp": "2026-10-27T18:21:48.995873+00:00",
+      "http_status": 200,
+      "dom_selector": "head > title",
+      "verbatim_text": "Title: Landscaping Services in Dallas and DFW | Words: 1905 | H1s: 1 | Canonical: https://groundhogstx.com/services/",
+      "hash_sha256": "2155402f37e53f48f7637d34992245054058bd6fcda5afe246b137faaa87c39e"
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "manifest_id": "evd_20261027_175851",
+  "records": [
+    {
+      "claim_type": "citation_verification",
+      "source_url": "https://business.google.com/groundhogstx",
+      "timestamp": "2026-10-27T17:58:45.472210+00:00",
+      "http_status": 200,
+      "dom_selector": "body",
+      "verbatim_text": "No NAP observed",
+      "hash_sha256": "56c12a8e09985cedc45367793d304e8648c4b4798e8c713dffc922da69090a90"
+    },
+    {
+      "claim_type": "citation_verification",
+      "source_url": "https://www.instagram.com/groundhogstx/",
+      "timestamp": "2026-10-27T17:58:46.328263+00:00",
+      "http_status": 200,
+      "dom_selector": "body",
+      "verbatim_text": "5188087",
+      "hash_sha256": "4fa4861c5337886566b46739fcd1efbb70931245516d51f210853fa04406bc90"
+    },
+    {
+      "claim_type": "citation_verification",
+      "source_url": "https://www.facebook.com/groundhogstx",
+      "timestamp": "2026-10-27T17:58:46.724632+00:00",
+      "http_status": 200,
+      "dom_selector": "body",
+      "verbatim_text": "7701408",
+      "hash_sha256": "e48fb29729a473c993e22b3f2dce4adc86874fac3e89471385604c3cd57c8fc1"
+    },
+    {
+      "claim_type": "citation_verification",
+      "source_url": "https://www.yelp.com/biz/groundhogs-services-dallas",
+      "timestamp": "2026-10-27T17:58:48.376994+00:00",
+      "http_status": 200,
+      "dom_selector": "body",
+      "verbatim_text": "7270048",
+      "hash_sha256": "9e2c2f691cd718020de363db74b1589b71e46af4ba3fca820108ef7e91767d2e"
+    },
+    {
+      "claim_type": "citation_verification",
+      "source_url": "https://www.bing.com/maps?q=Groundhogs+Services+Dallas",
+      "timestamp": "2026-10-27T17:58:51.289880+00:00",
+      "http_status": 200,
+      "dom_selector": "meta[property='og:title']",
+      "verbatim_text": "Bing Maps - (214) 229-4548",
+      "hash_sha256": "bfb5001f5386aa482839085910bf25cc00826314dc1a85960d9f04c1788d1e83"
+    },
+    {
+      "claim_type": "citation_verification",
+      "source_url": "https://www.yellowpages.com/dallas-tx/groundhogs-services",
+      "timestamp": "2026-10-27T17:58:51.465566+00:00",
+      "http_status": 200,
+      "dom_selector": "script[type='application/ld+json']",
+      "verbatim_text": "Groundhogs Services - 808 Haymarket Rd, Dallas, TX, 75217 - (214) 713-1228",
+      "hash_sha256": "89e87c291b58dc00ff6c52eaa14f027591f8e02a54434f4a908dbba72d2e6c3d"
+    }
+  ]
+}

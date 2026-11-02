@@ -1,0 +1,14 @@
+{
+  "manifest_id": "evd_20261027_175800",
+  "records": [
+    {
+      "claim_type": "local_serp_check",
+      "source_url": "https://www.google.com/search?q=landscaping+dallas+Dallas%2C+TX",
+      "timestamp": "2026-10-27T17:58:00.383097+00:00",
+      "http_status": 200,
+      "dom_selector": "div#search",
+      "verbatim_text": "Local Pack: 0 items | Organic: 0 items",
+      "hash_sha256": "f71b6c14e4ec9a982fc2f3a96fd3851dfd16f6fb90270aee5cd291ddecacd2a7"
+    }
+  ]
+}

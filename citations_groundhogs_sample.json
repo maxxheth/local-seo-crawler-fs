@@ -1,0 +1,59 @@
+{
+  "business": "Groundhogs Services",
+  "nap": {
+    "name": "Groundhogs Services",
+    "address": "\"808 Haymarket Rd, Dallas, TX 75217\"",
+    "phone_primary": "\"(214) 713-1228\"",
+    "phone_secondary": "\"(469) 902-4154\""
+  },
+  "citations": [
+    {
+      "platform": "google_business_profile",
+      "label": "Google Business Profile",
+      "url": "https://business.google.com/groundhogstx",
+      "status": "live",
+      "nap_match": "match",
+      "checked_at": "2026-08-12T19:56:44Z"
+    },
+    {
+      "platform": "facebook",
+      "label": "Facebook",
+      "url": "https://www.facebook.com/groundhogstx",
+      "status": "live",
+      "nap_match": "unknown",
+      "checked_at": "2026-08-12T19:56:39Z"
+    },
+    {
+      "platform": "instagram",
+      "label": "Instagram",
+      "url": "https://www.instagram.com/groundhogstx/",
+      "status": "live",
+      "nap_match": "unknown",
+      "checked_at": "2026-08-12T19:56:40Z"
+    },
+    {
+      "platform": "yelp",
+      "label": "Yelp",
+      "url": "https://www.yelp.com/biz/groundhogs-services-dallas",
+      "status": "blocked",
+      "nap_match": "unknown",
+      "checked_at": "2026-08-12T19:56:40Z"
+    },
+    {
+      "platform": "bing_places",
+      "label": "Bing Places",
+      "url": "https://www.bing.com/maps?q=Groundhogs+Services+Dallas",
+      "status": "blocked",
+      "nap_match": "unknown",
+      "checked_at": "2026-08-12T19:56:40Z"
+    },
+    {
+      "platform": "yellowpages",
+      "label": "YellowPages",
+      "url": "https://www.yellowpages.com/dallas-tx/groundhogs-services",
+      "status": "blocked",
+      "nap_match": "unknown",
+      "checked_at": "2026-08-12T19:56:40Z"
+    }
+  ]
+}

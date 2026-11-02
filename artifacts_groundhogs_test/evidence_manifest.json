@@ -1,0 +1,50 @@
+{
+  "manifest_id": "evd_20261027_175704",
+  "records": [
+    {
+      "claim_type": "technical_page_audit",
+      "source_url": "https://groundhogstx.com/",
+      "timestamp": "2026-10-27T17:56:34.207633+00:00",
+      "http_status": 200,
+      "dom_selector": "head > title",
+      "verbatim_text": "Title: Groundhogs Services – Landscape installation, irrigation, sod, and outdoor curb-appeal services for Dallas and surrounding DFW communities. | Words: 1064 | H1s: 1 | Canonical: https://groundhogstx.com/",
+      "hash_sha256": "9cd638cc9bae627563c380aa4c00655d9d12e7e719d96287543e49df9fac457a"
+    },
+    {
+      "claim_type": "technical_page_audit",
+      "source_url": "https://groundhogstx.com/about-us",
+      "timestamp": "2026-10-27T17:56:35.816911+00:00",
+      "http_status": 200,
+      "dom_selector": "head > title",
+      "verbatim_text": "Title: About Groundhogs Services | Words: 1009 | H1s: 1 | Canonical: https://groundhogstx.com/about-us/",
+      "hash_sha256": "1e2bc9d4579f1398a8a05bafe88966146f2be97bfc40f1f0f36e7e5337c1fab6"
+    },
+    {
+      "claim_type": "technical_page_audit",
+      "source_url": "https://groundhogstx.com/locations/",
+      "timestamp": "2026-10-27T17:56:38.385952+00:00",
+      "http_status": 200,
+      "dom_selector": "head > title",
+      "verbatim_text": "Title: Dallas and DFW Service Areas | Words: 1081 | H1s: 1 | Canonical: https://groundhogstx.com/locations/",
+      "hash_sha256": "987418016cbee8d8bf9466b05463bfb517668e431b970bbb8a6c96a90c3bc710"
+    },
+    {
+      "claim_type": "technical_page_audit",
+      "source_url": "https://groundhogstx.com/gallery",
+      "timestamp": "2026-10-27T17:56:40.250633+00:00",
+      "http_status": 200,
+      "dom_selector": "head > title",
+      "verbatim_text": "Title: Groundhogs Services Project Gallery | Words: 891 | H1s: 1 | Canonical: https://groundhogstx.com/gallery/",
+      "hash_sha256": "85b18d9b08390a9ad520f786791b5f7b45dd62dbb54dc909567efa9410332357"
+    },
+    {
+      "claim_type": "technical_page_audit",
+      "source_url": "https://groundhogstx.com/services",
+      "timestamp": "2026-10-27T17:57:04.155332+00:00",
+      "http_status": 200,
+      "dom_selector": "head > title",
+      "verbatim_text": "Title: Landscaping Services in Dallas and DFW | Words: 1905 | H1s: 1 | Canonical: https://groundhogstx.com/services/",
+      "hash_sha256": "2155402f37e53f48f7637d34992245054058bd6fcda5afe246b137faaa87c39e"
+    }
+  ]
+}

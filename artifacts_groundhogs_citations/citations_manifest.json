@@ -1,0 +1,145 @@
+{
+  "business": "Groundhogs Services",
+  "checked_at": "2026-10-27T17:58:51.469809+00:00",
+  "summary": {
+    "total": 6,
+    "live": 6,
+    "blocked": 0,
+    "mismatch": 5
+  },
+  "citations": [
+    {
+      "platform": "google_business_profile",
+      "label": "Google Business Profile",
+      "url": "https://business.google.com/groundhogstx",
+      "status": "live",
+      "nap_match": "mismatch",
+      "observed": {
+        "name": "",
+        "address": "",
+        "phone": ""
+      },
+      "confidence": "low",
+      "evidence_snippet": "No NAP observed",
+      "proxy_port": 10001,
+      "secondary_phones": [],
+      "website_url": "",
+      "operating_hours": "",
+      "badges": []
+    },
+    {
+      "platform": "instagram",
+      "label": "Instagram",
+      "url": "https://www.instagram.com/groundhogstx/",
+      "status": "live",
+      "nap_match": "mismatch",
+      "observed": {
+        "name": "",
+        "address": "",
+        "phone": "5188087"
+      },
+      "confidence": "low",
+      "evidence_snippet": "5188087",
+      "proxy_port": 10003,
+      "secondary_phones": [
+        "7701408",
+        "5176138",
+        "3299008",
+        "5000000"
+      ],
+      "website_url": "",
+      "operating_hours": "",
+      "badges": []
+    },
+    {
+      "platform": "facebook",
+      "label": "Facebook",
+      "url": "https://www.facebook.com/groundhogstx",
+      "status": "live",
+      "nap_match": "mismatch",
+      "observed": {
+        "name": "",
+        "address": "",
+        "phone": "7701408"
+      },
+      "confidence": "low",
+      "evidence_snippet": "7701408",
+      "proxy_port": 10002,
+      "secondary_phones": [
+        "(613) 217-3098",
+        "5000000",
+        "5189113",
+        "7931239"
+      ],
+      "website_url": "",
+      "operating_hours": "",
+      "badges": []
+    },
+    {
+      "platform": "yelp",
+      "label": "Yelp",
+      "url": "https://www.yelp.com/biz/groundhogs-services-dallas",
+      "status": "live",
+      "nap_match": "mismatch",
+      "observed": {
+        "name": "",
+        "address": "",
+        "phone": "7270048"
+      },
+      "confidence": "low",
+      "evidence_snippet": "7270048",
+      "proxy_port": 10001,
+      "secondary_phones": [
+        "(369) 721-5461"
+      ],
+      "website_url": "",
+      "operating_hours": "",
+      "badges": []
+    },
+    {
+      "platform": "bing_places",
+      "label": "Bing Places",
+      "url": "https://www.bing.com/maps?q=Groundhogs+Services+Dallas",
+      "status": "live",
+      "nap_match": "mismatch",
+      "observed": {
+        "name": "Bing Maps",
+        "address": "",
+        "phone": "(214) 229-4548"
+      },
+      "confidence": "high",
+      "evidence_snippet": "Bing Maps - (214) 229-4548",
+      "proxy_port": 10003,
+      "secondary_phones": [],
+      "website_url": "",
+      "operating_hours": "",
+      "badges": [
+        "Verified Owner / Claimed"
+      ]
+    },
+    {
+      "platform": "yellowpages",
+      "label": "YellowPages",
+      "url": "https://www.yellowpages.com/dallas-tx/groundhogs-services",
+      "status": "live",
+      "nap_match": "match",
+      "observed": {
+        "name": "Groundhogs Services",
+        "address": "808 Haymarket Rd, Dallas, TX, 75217",
+        "phone": "(214) 713-1228"
+      },
+      "confidence": "high",
+      "evidence_snippet": "Groundhogs Services - 808 Haymarket Rd, Dallas, TX, 75217 - (214) 713-1228",
+      "proxy_port": 10002,
+      "secondary_phones": [
+        "(972) 845-1496",
+        "(817) 225-2495"
+      ],
+      "website_url": "https://www.yellowpages.com/dallas-tx/mip/groundhogs-services-582190294",
+      "operating_hours": "",
+      "badges": [
+        "Verified Owner / Claimed"
+      ]
+    }
+  ]
+}
