@@ -607,3 +607,71 @@ def test_clean_csv_export_without_json_blobs(tmp_path: Path) -> None:
     # Verify clean scalar summaries exist
     assert "Primary Headline" in content
     assert "123-456-7890" in content
+
+
+def test_excel_xml_control_char_sanitization_and_chunked_export(tmp_path: Path) -> None:
+    """Verify illegal XML control characters are stripped and multi-part chunked Excel exports scope records."""
+    pages = [
+        {
+            "url": f"https://example.com/page-{i}",
+            "title": f"Page {i}\x00\x0b\x1f Title",
+            "meta_description": "Description with control chars \x07\x08",
+            "status_code": 200,
+            "h1": [f"H1 Tag {i}\x00"],
+            "og_tags": {"og:title": f"OG {i}"},
+            "twitter_tags": {"twitter:card": "summary"},
+        }
+        for i in range(5)
+    ]
+    evidence = [
+        {
+            "claim_type": "audit",
+            "source_url": f"https://example.com/page-{i}",
+            "timestamp": "2026-11-02T12:00:00Z",
+            "http_status": 200,
+            "dom_selector": "title",
+            "verbatim_text": f"Verbatim \x00\x0c {i}",
+            "hash_sha256": f"hash_{i}",
+        }
+        for i in range(5)
+    ]
+    links = [
+        {
+            "source_url": f"https://example.com/page-{i}",
+            "target_url": "https://example.com/target",
+            "anchor_text": f"Anchor \x00 {i}",
+            "placement": "body",
+            "is_nofollow": False,
+        }
+        for i in range(5)
+    ]
+
+    mgr = OutputManager(
+        output_dir=str(tmp_path / "chunked_excel"),
+        export_format="xlsx",
+        export_mode="multi",
+        export_chunk_size=2,
+    )
+    res = mgr.export_site_crawl(
+        target_domain="example.com",
+        pages=pages,
+        evidence_records=evidence,
+        link_edges=links,
+    )
+    assert "site_crawl_excel" in res
+    part1 = Path(tmp_path / "chunked_excel" / "site_crawl_artifact_part_0001.xlsx")
+    part3 = Path(tmp_path / "chunked_excel" / "site_crawl_artifact_part_0003.xlsx")
+    assert part1.exists()
+    assert part3.exists()
+
+    wb1 = openpyxl.load_workbook(part1)
+    # Part 1 has 2 pages -> Pages Overview has header + 2 rows = 3 rows
+    assert wb1["Pages Overview"].max_row == 3
+    # Title had \x00\x0b\x1f stripped cleanly
+    assert wb1["Pages Overview"].cell(row=2, column=4).value == "Page 0 Title"
+    # Social & Analytics populated og:title
+    assert wb1["Social & Analytics"].cell(row=2, column=2).value == "OG 0"
+    # Links scoped to the 2 pages in chunk 1 (header + 2 rows = 3)
+    assert wb1["Internal Links & Broken"].max_row == 3
+    # Evidence scoped to the 2 pages in chunk 1 (header + 2 rows = 3)
+    assert wb1["Evidence (EVD-01)"].max_row == 3

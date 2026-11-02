@@ -53,7 +53,7 @@ def write_yaml_file(file_path: Path | str, data: Any) -> str:
 
 def flatten_record_for_csv(record: dict[str, Any]) -> dict[str, Any]:
     """Flatten nested structures into clean scalar summaries for CSV export.
-    
+
     Avoids cluttered serialized raw JSON blobs by extracting counts, joined strings,
     and discrete sub-fields.
     """
@@ -61,7 +61,22 @@ def flatten_record_for_csv(record: dict[str, Any]) -> dict[str, Any]:
     for k, v in record.items():
         if isinstance(v, list):
             if not v:
-                flat[k] = ""
+                if k in ("h1", "h2", "h3"):
+                    if k == "h1":
+                        flat["primary_h1"] = ""
+                    flat[f"{k}_count"] = 0
+                elif k == "issues":
+                    flat["issues_count"] = 0
+                    flat["errors_count"] = 0
+                    flat["warnings_count"] = 0
+                    flat["issues_summary"] = ""
+                else:
+                    flat[k] = ""
+            elif k in ("h1", "h2", "h3") and all(isinstance(x, str) for x in v):
+                if k == "h1":
+                    flat["primary_h1"] = v[0]
+                flat[f"{k}_count"] = len(v)
+                flat[k] = "; ".join(v)
             elif all(isinstance(x, (str, int, float, bool)) for x in v):
                 # Primitive list: join with semicolon
                 flat[k] = "; ".join(str(x) for x in v)
@@ -75,10 +90,20 @@ def flatten_record_for_csv(record: dict[str, Any]) -> dict[str, Any]:
                     flat["h3_count"] = sum(1 for x in v if x.get("level") == "h3")
                 elif k == "issues":
                     flat["issues_count"] = len(v)
-                    critical_count = sum(1 for x in v if str(x.get("severity", "")).lower() == "critical")
-                    flat["critical_issues_count"] = critical_count
+                    errors_count = sum(
+                        1 for x in v if str(x.get("severity", "")).lower() in ("error", "critical")
+                    )
+                    warnings_count = sum(
+                        1 for x in v if str(x.get("severity", "")).lower() == "warning"
+                    )
+                    flat["errors_count"] = errors_count
+                    flat["warnings_count"] = warnings_count
                     flat["issues_summary"] = "; ".join(
                         f"[{x.get('severity', '')}] {x.get('issue', '')}" for x in v
+                    )
+                elif k == "hreflang":
+                    flat["hreflang"] = "; ".join(
+                        f"{x.get('lang', '')}={x.get('url', '')}" for x in v if x.get("lang")
                     )
                 else:
                     flat[f"{k}_count"] = len(v)
@@ -92,12 +117,22 @@ def flatten_record_for_csv(record: dict[str, Any]) -> dict[str, Any]:
                 addresses = v.get("addresses", [])
                 flat["nap_phones"] = "; ".join(phones) if isinstance(phones, list) else str(phones)
                 flat["nap_addresses"] = "; ".join(addresses) if isinstance(addresses, list) else str(addresses)
-            elif k in ("social_tags", "tracking_tags"):
+            elif k == "observed":
+                flat["observed_name"] = v.get("name", "")
+                flat["observed_address"] = v.get("address", "")
+                flat["observed_phone"] = v.get("phone", "")
+            elif k == "images":
+                flat["images_total"] = v.get("total_images", 0)
+                flat["images_missing_alt"] = v.get("missing_alt_count", 0)
+                flat["images_missing_dims"] = v.get("missing_dimensions_count", 0)
+            elif k in ("og_tags", "twitter_tags", "social_tags", "analytics", "tracking_tags"):
+                prefix = k.replace("_tags", "")
                 for sub_k, sub_v in v.items():
                     if sub_v:
-                        flat[f"{k}_{sub_k}"] = sub_v
+                        clean_sub_k = sub_k.replace("og:", "").replace("twitter:", "")
+                        flat[f"{prefix}_{clean_sub_k}"] = sub_v
             else:
-                # Comma-separated key=val for non-empty values
+                # Semicolon-separated key=val for non-empty values
                 flat[k] = "; ".join(f"{sub_k}={sub_v}" for sub_k, sub_v in v.items() if sub_v)
         else:
             flat[k] = v
@@ -128,7 +163,7 @@ def write_csv_file(file_path: Path | str, rows: list[dict[str, Any]]) -> str:
 
 class OutputManager:
     """Writes standardized output artifacts according to strict schemas and formats.
-    
+
     Supports canonical JSON, structured YAML, sanitized CSV, and rich multi-worksheet
     Excel (.xlsx) exports.
     """
@@ -308,12 +343,14 @@ class OutputManager:
                 num_chunks = (len(clean_citations) + chunk_size - 1) // chunk_size or 1
                 for idx in range(num_chunks):
                     batch = clean_citations[idx * chunk_size : (idx + 1) * chunk_size]
+                    batch_urls = {c.get("url", "") for c in batch}
+                    batch_ev = [e for e in clean_evidence if e.get("source_url") in batch_urls]
                     chunk_path = self.output_dir / f"citations_manifest_part_{idx + 1:04d}.xlsx"
                     write_citations_excel(
                         chunk_path,
                         business_name=business_name,
                         citations=batch,
-                        evidence_records=clean_evidence,
+                        evidence_records=batch_ev,
                     )
                     all_created_files.append(str(chunk_path))
                 result["citations_excel"] = str(self.output_dir / "citations_manifest_part_0001.xlsx")
@@ -386,15 +423,23 @@ class OutputManager:
                 num_chunks = (len(page_objs) + chunk_size - 1) // chunk_size or 1
                 for idx in range(num_chunks):
                     batch = page_objs[idx * chunk_size : (idx + 1) * chunk_size]
+                    batch_urls = {p.url for p in batch}
+                    batch_summary = generate_site_summary(batch) if batch else SiteAuditSummary()
+                    batch_ev = [e for e in clean_evidence if e.get("source_url") in batch_urls]
+                    batch_links = (
+                        [l for l in link_edges if l.get("source_url") in batch_urls]
+                        if link_edges
+                        else None
+                    )
                     chunk_path = self.output_dir / f"site_crawl_artifact_part_{idx + 1:04d}.xlsx"
                     write_site_crawl_excel(
                         chunk_path,
                         target_domain=target_domain,
                         pages=batch,
-                        audit_summary=summary,
+                        audit_summary=batch_summary,
                         crawl_depth=crawl_depth,
-                        evidence_records=clean_evidence,
-                        link_edges=link_edges,
+                        evidence_records=batch_ev,
+                        link_edges=batch_links,
                     )
                     all_created_files.append(str(chunk_path))
                 result["site_crawl_excel"] = str(self.output_dir / "site_crawl_artifact_part_0001.xlsx")

@@ -9,12 +9,31 @@ import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+import re
+
 from src.models import (
     CitationItem,
     EvidenceRecord,
     PageTechnicalRecord,
     SiteAuditSummary,
 )
+
+# XML 1.0 illegal control characters (0x00-0x08, 0x0B-0x0C, 0x0E-0x1F)
+_ILLEGAL_XML_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _sanitize_data(obj: Any) -> Any:
+    """Recursively strip XML 1.0 illegal control characters from strings, lists, dicts, and Pydantic models."""
+    if isinstance(obj, str):
+        return _ILLEGAL_XML_CHARS_RE.sub("", obj)
+    if isinstance(obj, list):
+        return [_sanitize_data(x) for x in obj]
+    if isinstance(obj, dict):
+        return {_sanitize_data(k): _sanitize_data(v) for k, v in obj.items()}
+    if hasattr(obj, "model_dump"):
+        cls = type(obj)
+        return cls(**_sanitize_data(obj.model_dump()))
+    return obj
 
 # Color Palette
 NAVY_HEADER = "1E293B"       # Slate 800
@@ -81,6 +100,8 @@ def _apply_table_styling(
         is_even = (r_idx % 2 == 0)
         for c_idx in range(1, max_col + 1):
             cell = ws.cell(row=r_idx, column=c_idx)
+            if isinstance(cell.value, str):
+                cell.value = _ILLEGAL_XML_CHARS_RE.sub("", cell.value)
             if not cell.font or cell.font.name != "Calibri":
                 cell.font = REGULAR_FONT
             cell.border = THIN_BORDER
@@ -142,6 +163,12 @@ def write_site_crawl_excel(
     # Remove default sheet
     default_sheet = wb.active
     wb.remove(default_sheet)
+
+    target_domain = _sanitize_data(target_domain)
+    pages = _sanitize_data(pages)
+    evidence_records = _sanitize_data(evidence_records)
+    link_edges = _sanitize_data(link_edges)
+    audit_summary = _sanitize_data(audit_summary)
 
     page_objs = [p if isinstance(p, PageTechnicalRecord) else PageTechnicalRecord(**p) for p in pages]
     evidence_objs = [
@@ -596,12 +623,12 @@ def write_site_crawl_excel(
         tw = p.twitter_tags
 
         ws_social.cell(row=soc_row, column=1, value=p.url)
-        ws_social.cell(row=soc_row, column=2, value=og.get("title", ""))
-        ws_social.cell(row=soc_row, column=3, value=og.get("type", ""))
-        ws_social.cell(row=soc_row, column=4, value=og.get("image", ""))
-        ws_social.cell(row=soc_row, column=5, value=og.get("url", ""))
-        ws_social.cell(row=soc_row, column=6, value=tw.get("card", ""))
-        ws_social.cell(row=soc_row, column=7, value=tw.get("title", ""))
+        ws_social.cell(row=soc_row, column=2, value=og.get("title") or og.get("og:title", ""))
+        ws_social.cell(row=soc_row, column=3, value=og.get("type") or og.get("og:type", ""))
+        ws_social.cell(row=soc_row, column=4, value=og.get("image") or og.get("og:image", ""))
+        ws_social.cell(row=soc_row, column=5, value=og.get("url") or og.get("og:url", ""))
+        ws_social.cell(row=soc_row, column=6, value=tw.get("card") or tw.get("twitter:card", ""))
+        ws_social.cell(row=soc_row, column=7, value=tw.get("title") or tw.get("twitter:title", ""))
 
         ws_social.cell(row=soc_row, column=8, value=a.ga4_id)
         ws_social.cell(row=soc_row, column=9, value=a.gtm_id)
@@ -667,6 +694,10 @@ def write_citations_excel(
     wb = openpyxl.Workbook()
     default_sheet = wb.active
     wb.remove(default_sheet)
+
+    business_name = _sanitize_data(business_name)
+    citations = _sanitize_data(citations)
+    evidence_records = _sanitize_data(evidence_records)
 
     citation_objs = [c if isinstance(c, CitationItem) else CitationItem(**c) for c in citations]
     evidence_objs = [
@@ -837,6 +868,9 @@ def write_serp_excel(
     default_sheet = wb.active
     wb.remove(default_sheet)
 
+    serp_data = _sanitize_data(serp_data)
+    evidence_records = _sanitize_data(evidence_records)
+
     evidence_objs = [
         e if isinstance(e, EvidenceRecord) else EvidenceRecord(**e)
         for e in (evidence_records or [])
@@ -847,7 +881,7 @@ def write_serp_excel(
     checked_at = serp_data.get("checked_at", "")
     local_pack = serp_data.get("local_pack", [])
     organic = serp_data.get("organic", [])
-    paa = serp_data.get("paa", [])
+    paa = serp_data.get("paa") or serp_data.get("people_also_ask", [])
 
     # Sheet 1: Query Summary
     ws_sum = wb.create_sheet(title="Query Summary")
@@ -963,34 +997,33 @@ def write_serp_excel(
     _apply_table_styling(ws_paa, start_row=1)
 
     # Sheet 6: Evidence (EVD-01)
-    if evidence_objs:
-        ws_ev = wb.create_sheet(title="Evidence (EVD-01)")
-        ws_ev.views.sheetView[0].showGridLines = True
-        ev_headers = [
-            "Source URL",
-            "Claim Type",
-            "HTTP Status",
-            "DOM Selector",
-            "Verbatim Text Excerpt",
-            "SHA-256 Proof Hash",
-            "Timestamp",
-        ]
-        for c_idx, h in enumerate(ev_headers, start=1):
-            ws_ev.cell(row=1, column=c_idx, value=h)
+    ws_ev = wb.create_sheet(title="Evidence (EVD-01)")
+    ws_ev.views.sheetView[0].showGridLines = True
+    ev_headers = [
+        "Source URL",
+        "Claim Type",
+        "HTTP Status",
+        "DOM Selector",
+        "Verbatim Text Excerpt",
+        "SHA-256 Proof Hash",
+        "Timestamp",
+    ]
+    for c_idx, h in enumerate(ev_headers, start=1):
+        ws_ev.cell(row=1, column=c_idx, value=h)
 
-        ev_r = 2
-        for ev in evidence_objs:
-            ws_ev.cell(row=ev_r, column=1, value=ev.source_url)
-            ws_ev.cell(row=ev_r, column=2, value=ev.claim_type)
-            c_st = ws_ev.cell(row=ev_r, column=3, value=ev.http_status)
-            _style_status_cell(c_st, ev.http_status)
-            ws_ev.cell(row=ev_r, column=4, value=ev.dom_selector)
-            ws_ev.cell(row=ev_r, column=5, value=ev.verbatim_text)
-            ws_ev.cell(row=ev_r, column=6, value=ev.hash_sha256)
-            ws_ev.cell(row=ev_r, column=7, value=ev.timestamp)
-            ev_r += 1
+    ev_r = 2
+    for ev in evidence_objs:
+        ws_ev.cell(row=ev_r, column=1, value=ev.source_url)
+        ws_ev.cell(row=ev_r, column=2, value=ev.claim_type)
+        c_st = ws_ev.cell(row=ev_r, column=3, value=ev.http_status)
+        _style_status_cell(c_st, ev.http_status)
+        ws_ev.cell(row=ev_r, column=4, value=ev.dom_selector)
+        ws_ev.cell(row=ev_r, column=5, value=ev.verbatim_text)
+        ws_ev.cell(row=ev_r, column=6, value=ev.hash_sha256)
+        ws_ev.cell(row=ev_r, column=7, value=ev.timestamp)
+        ev_r += 1
 
-        _apply_table_styling(ws_ev, start_row=1)
+    _apply_table_styling(ws_ev, start_row=1)
 
     out_path = Path(file_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
