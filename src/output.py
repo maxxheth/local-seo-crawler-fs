@@ -14,6 +14,11 @@ import zipfile
 import yaml
 import zstandard as zstd
 
+from src.excel_exporter import (
+    write_citations_excel,
+    write_serp_excel,
+    write_site_crawl_excel,
+)
 from src.models import (
     CitationItem,
     CitationsManifest,
@@ -47,11 +52,53 @@ def write_yaml_file(file_path: Path | str, data: Any) -> str:
 
 
 def flatten_record_for_csv(record: dict[str, Any]) -> dict[str, Any]:
-    """Flatten nested structures into string representations for CSV export."""
+    """Flatten nested structures into clean scalar summaries for CSV export.
+    
+    Avoids cluttered serialized raw JSON blobs by extracting counts, joined strings,
+    and discrete sub-fields.
+    """
     flat: dict[str, Any] = {}
     for k, v in record.items():
-        if isinstance(v, (dict, list)):
-            flat[k] = json.dumps(v, ensure_ascii=False)
+        if isinstance(v, list):
+            if not v:
+                flat[k] = ""
+            elif all(isinstance(x, (str, int, float, bool)) for x in v):
+                # Primitive list: join with semicolon
+                flat[k] = "; ".join(str(x) for x in v)
+            elif all(isinstance(x, dict) for x in v):
+                # Domain-specific summaries for known list of dicts
+                if k == "headings":
+                    h1_items = [x.get("text", "") for x in v if x.get("level") == "h1"]
+                    flat["primary_h1"] = h1_items[0] if h1_items else ""
+                    flat["h1_count"] = len(h1_items)
+                    flat["h2_count"] = sum(1 for x in v if x.get("level") == "h2")
+                    flat["h3_count"] = sum(1 for x in v if x.get("level") == "h3")
+                elif k == "issues":
+                    flat["issues_count"] = len(v)
+                    critical_count = sum(1 for x in v if str(x.get("severity", "")).lower() == "critical")
+                    flat["critical_issues_count"] = critical_count
+                    flat["issues_summary"] = "; ".join(
+                        f"[{x.get('severity', '')}] {x.get('issue', '')}" for x in v
+                    )
+                else:
+                    flat[f"{k}_count"] = len(v)
+            else:
+                flat[f"{k}_count"] = len(v)
+        elif isinstance(v, dict):
+            if not v:
+                flat[k] = ""
+            elif k == "nap_found":
+                phones = v.get("phones", [])
+                addresses = v.get("addresses", [])
+                flat["nap_phones"] = "; ".join(phones) if isinstance(phones, list) else str(phones)
+                flat["nap_addresses"] = "; ".join(addresses) if isinstance(addresses, list) else str(addresses)
+            elif k in ("social_tags", "tracking_tags"):
+                for sub_k, sub_v in v.items():
+                    if sub_v:
+                        flat[f"{k}_{sub_k}"] = sub_v
+            else:
+                # Comma-separated key=val for non-empty values
+                flat[k] = "; ".join(f"{sub_k}={sub_v}" for sub_k, sub_v in v.items() if sub_v)
         else:
             flat[k] = v
     return flat
@@ -80,7 +127,11 @@ def write_csv_file(file_path: Path | str, rows: list[dict[str, Any]]) -> str:
 
 
 class OutputManager:
-    """Writes standardized output artifacts according to strict schemas and formats."""
+    """Writes standardized output artifacts according to strict schemas and formats.
+    
+    Supports canonical JSON, structured YAML, sanitized CSV, and rich multi-worksheet
+    Excel (.xlsx) exports.
+    """
 
     def __init__(
         self,
@@ -93,7 +144,8 @@ class OutputManager:
     ) -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.export_format = export_format.lower()
+        raw_fmt = export_format.lower()
+        self.export_format = "xlsx" if raw_fmt == "excel" else raw_fmt
         self.export_mode = export_mode.lower()
         self.export_chunk_size = export_chunk_size
         self.archive_format = archive_format.lower()
@@ -229,12 +281,12 @@ class OutputManager:
 
         json_path = self.output_dir / "citations_manifest.json"
         write_json_file(json_path, manifest.model_dump())
-
         all_created_files = [str(json_path)]
-        if self.export_format != "json" or self.export_mode in ("multi", "chunked"):
-            exported_custom = self._write_data("citations_manifest", clean_citations, is_list_records=True)
-            all_created_files.extend(exported_custom)
+        result: dict[str, str] = {
+            "citations_manifest": str(json_path),
+        }
 
+        # Evidence records
         clean_evidence: list[dict[str, Any]] = []
         if evidence_records:
             for ev in evidence_records:
@@ -247,13 +299,40 @@ class OutputManager:
         ev_json_path = self.output_dir / "evidence_manifest.json"
         write_json_file(ev_json_path, ev_manifest.model_dump())
         all_created_files.append(str(ev_json_path))
+        result["evidence_manifest"] = str(ev_json_path)
+
+        # Excel (.xlsx) export
+        if self.export_format in ("xlsx", "excel"):
+            if self.export_mode in ("multi", "chunked"):
+                chunk_size = max(1, self.export_chunk_size)
+                num_chunks = (len(clean_citations) + chunk_size - 1) // chunk_size or 1
+                for idx in range(num_chunks):
+                    batch = clean_citations[idx * chunk_size : (idx + 1) * chunk_size]
+                    chunk_path = self.output_dir / f"citations_manifest_part_{idx + 1:04d}.xlsx"
+                    write_citations_excel(
+                        chunk_path,
+                        business_name=business_name,
+                        citations=batch,
+                        evidence_records=clean_evidence,
+                    )
+                    all_created_files.append(str(chunk_path))
+                result["citations_excel"] = str(self.output_dir / "citations_manifest_part_0001.xlsx")
+            else:
+                xlsx_path = self.output_dir / "citations_manifest.xlsx"
+                write_citations_excel(
+                    xlsx_path,
+                    business_name=business_name,
+                    citations=clean_citations,
+                    evidence_records=clean_evidence,
+                )
+                all_created_files.append(str(xlsx_path))
+                result["citations_excel"] = str(xlsx_path)
+
+        elif self.export_format != "json" or self.export_mode in ("multi", "chunked"):
+            exported_custom = self._write_data("citations_manifest", clean_citations, is_list_records=True)
+            all_created_files.extend(exported_custom)
 
         archive_path = self.package_archive(all_created_files, archive_name="citations_export")
-
-        result = {
-            "citations_manifest": str(json_path),
-            "evidence_manifest": str(ev_json_path),
-        }
         if archive_path:
             result["archive"] = archive_path
         return result
@@ -265,9 +344,9 @@ class OutputManager:
         crawl_depth: int = 1,
         evidence_records: list[dict[str, Any] | EvidenceRecord] | None = None,
         audit_summary: SiteAuditSummary | None = None,
+        link_edges: list[dict[str, Any]] | None = None,
     ) -> dict[str, str]:
         """Export site_crawl_artifact and evidence_manifest."""
-        # Calculate summary if not explicitly provided
         page_objs = [p if isinstance(p, PageTechnicalRecord) else PageTechnicalRecord(**p) for p in pages]
         summary = audit_summary or generate_site_summary(page_objs)
 
@@ -281,15 +360,9 @@ class OutputManager:
         json_path = self.output_dir / "site_crawl_artifact.json"
         write_json_file(json_path, site_artifact.model_dump())
         all_created_files = [str(json_path)]
-
-        # Custom format or chunked multi-file export
-        if self.export_format != "json" or self.export_mode in ("multi", "chunked"):
-            exported_custom = self._write_data(
-                "site_crawl_artifact",
-                [p.model_dump() for p in page_objs],
-                is_list_records=True,
-            )
-            all_created_files.extend(exported_custom)
+        result: dict[str, str] = {
+            "site_crawl_artifact": str(json_path),
+        }
 
         # Evidence manifest
         clean_evidence: list[dict[str, Any]] = []
@@ -304,13 +377,51 @@ class OutputManager:
         ev_json_path = self.output_dir / "evidence_manifest.json"
         write_json_file(ev_json_path, ev_manifest.model_dump())
         all_created_files.append(str(ev_json_path))
+        result["evidence_manifest"] = str(ev_json_path)
+
+        # Excel (.xlsx) export
+        if self.export_format in ("xlsx", "excel"):
+            if self.export_mode in ("multi", "chunked"):
+                chunk_size = max(1, self.export_chunk_size)
+                num_chunks = (len(page_objs) + chunk_size - 1) // chunk_size or 1
+                for idx in range(num_chunks):
+                    batch = page_objs[idx * chunk_size : (idx + 1) * chunk_size]
+                    chunk_path = self.output_dir / f"site_crawl_artifact_part_{idx + 1:04d}.xlsx"
+                    write_site_crawl_excel(
+                        chunk_path,
+                        target_domain=target_domain,
+                        pages=batch,
+                        audit_summary=summary,
+                        crawl_depth=crawl_depth,
+                        evidence_records=clean_evidence,
+                        link_edges=link_edges,
+                    )
+                    all_created_files.append(str(chunk_path))
+                result["site_crawl_excel"] = str(self.output_dir / "site_crawl_artifact_part_0001.xlsx")
+            else:
+                xlsx_path = self.output_dir / "site_crawl_artifact.xlsx"
+                write_site_crawl_excel(
+                    xlsx_path,
+                    target_domain=target_domain,
+                    pages=page_objs,
+                    audit_summary=summary,
+                    crawl_depth=crawl_depth,
+                    evidence_records=clean_evidence,
+                    link_edges=link_edges,
+                )
+                all_created_files.append(str(xlsx_path))
+                result["site_crawl_excel"] = str(xlsx_path)
+
+        # Custom format (csv, yaml) or chunked multi-file export
+        elif self.export_format != "json" or self.export_mode in ("multi", "chunked"):
+            exported_custom = self._write_data(
+                "site_crawl_artifact",
+                [p.model_dump() for p in page_objs],
+                is_list_records=True,
+            )
+            all_created_files.extend(exported_custom)
 
         archive_path = self.package_archive(all_created_files, archive_name=f"site_crawl_{target_domain}")
-
-        result = {
-            "site_crawl_artifact": str(json_path),
-            "evidence_manifest": str(ev_json_path),
-        }
         if archive_path:
             result["archive"] = archive_path
         return result
@@ -324,10 +435,9 @@ class OutputManager:
         serp_path = self.output_dir / "serp_artifact.json"
         write_json_file(serp_path, serp_data)
         all_created_files = [str(serp_path)]
-
-        if self.export_format != "json":
-            exported_custom = self._write_data("serp_artifact", serp_data, is_list_records=False)
-            all_created_files.extend(exported_custom)
+        result: dict[str, str] = {
+            "serp_artifact": str(serp_path),
+        }
 
         clean_evidence: list[dict[str, Any]] = []
         if evidence_records:
@@ -341,13 +451,24 @@ class OutputManager:
         evidence_path = self.output_dir / "evidence_manifest.json"
         write_json_file(evidence_path, ev_manifest.model_dump())
         all_created_files.append(str(evidence_path))
+        result["evidence_manifest"] = str(evidence_path)
+
+        # Excel (.xlsx) export
+        if self.export_format in ("xlsx", "excel"):
+            xlsx_path = self.output_dir / "serp_artifact.xlsx"
+            write_serp_excel(
+                xlsx_path,
+                serp_data=serp_data,
+                evidence_records=clean_evidence,
+            )
+            all_created_files.append(str(xlsx_path))
+            result["serp_excel"] = str(xlsx_path)
+
+        elif self.export_format != "json":
+            exported_custom = self._write_data("serp_artifact", serp_data, is_list_records=False)
+            all_created_files.extend(exported_custom)
 
         archive_path = self.package_archive(all_created_files, archive_name="serp_export")
-
-        result = {
-            "serp_artifact": str(serp_path),
-            "evidence_manifest": str(evidence_path),
-        }
         if archive_path:
             result["archive"] = archive_path
         return result
@@ -358,18 +479,20 @@ class OutputManager:
         mode: str,
         meta: dict[str, Any] | None = None,
     ) -> dict[str, str]:
-        """Export artifacts directly from SQLite storage."""
+        """Export artifacts directly from SQLite storage (the ultimate source of truth)."""
         meta = meta or {}
         evidence_all = storage.fetch_all_evidence()
 
         if mode == "competitor":
             pages_raw = storage.fetch_all_pages()
+            link_edges = storage.fetch_all_internal_links()
             target_domain = meta.get("domain", "competitor.com")
             return self.export_site_crawl(
                 target_domain=target_domain,
                 pages=pages_raw,
                 crawl_depth=meta.get("max_depth", 5),
                 evidence_records=evidence_all,
+                link_edges=link_edges,
             )
         elif mode == "citations":
             citations = storage.fetch_all_citations()

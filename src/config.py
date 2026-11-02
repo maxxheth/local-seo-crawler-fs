@@ -41,12 +41,14 @@ def load_config() -> dict[str, Any]:
     use_sitemap = _parse_bool(os.getenv("USE_SITEMAP"), default=True)
     fast_http_first = _parse_bool(os.getenv("FAST_HTTP_FIRST"), default=True)
 
-    # Queue & storage settings
+    # Queue & storage settings (SQLite is primary persistence)
     redis_url = os.getenv("REDIS_URL", "").strip()
     sqlite_db_name = os.getenv("SQLITE_DB_NAME", "crawl_results.db").strip()
 
     # Export & archive settings
     export_format = os.getenv("EXPORT_FORMAT", "json").strip().lower()
+    if export_format == "excel":
+        export_format = "xlsx"
     export_mode = os.getenv("EXPORT_MODE", "single").strip().lower()
     export_chunk_size = int(os.getenv("EXPORT_CHUNK_SIZE", "250"))
     archive_format = os.getenv("ARCHIVE_FORMAT", "none").strip().lower()
@@ -121,7 +123,7 @@ def load_proxies(proxy_file: str) -> list[str]:
 
 
 def extract_proxy_port(proxy_url: str | None) -> int | None:
-    """Extract integer port from a proxy URL (e.g. http://u:p@host:10002 -> 10002)."""
+    """Extract integer port from a proxy URL (e.g. http://user:pass@host:10002 -> 10002)."""
     if not proxy_url:
         return None
     try:

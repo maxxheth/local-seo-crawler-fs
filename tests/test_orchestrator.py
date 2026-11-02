@@ -7,6 +7,8 @@ import tarfile
 from typing import Any
 import zipfile
 
+import openpyxl
+
 from src import scraper
 from src.models import PageTechnicalRecord
 from src.orchestrator import CrawlerOrchestrator
@@ -317,3 +319,291 @@ def test_orchestrator_chunked_run_with_retry(monkeypatch: Any, tmp_path: Path) -
     # Verify link graph post-crawl sync populated inlinks_count
     subpage = next(p for p in pages if p["url"] == "https://example.com/subpage-1")
     assert subpage["inlinks_count"] == 1
+
+
+def test_excel_export_multi_worksheet(tmp_path: Path) -> None:
+    """Test Excel export produces rich multi-worksheet workbooks with atomic cell values."""
+    pages = [
+        {
+            "url": "https://example.com/",
+            "title": "Homepage Example",
+            "meta_description": "Home page meta description for local business testing.",
+            "status_code": 200,
+            "word_count": 520,
+            "response_time_ms": 240,
+            "h1": ["Main Business Title"],
+            "h2": ["Our Services"],
+            "issues": [
+                {
+                    "url": "https://example.com/",
+                    "severity": "warning",
+                    "category": "meta",
+                    "issue": "Missing OG Image",
+                    "details": "OG image tag absent",
+                }
+            ],
+            "images": {
+                "total_images": 5,
+                "missing_alt_count": 1,
+                "decorative_alt_count": 0,
+                "missing_dimensions_count": 0,
+                "missing_alt_sample_urls": ["https://example.com/logo.png"],
+            },
+            "schema_types": ["LocalBusiness", "PostalAddress"],
+            "nap_found": {"phones": ["(214) 555-0199"], "addresses": ["123 Main St, Dallas, TX"]},
+            "og_tags": {"og:title": "Homepage Example"},
+            "twitter_tags": {"twitter:card": "summary_large_image"},
+            "analytics": {"ga4_id": "G-ABC1234", "gtm_id": "GTM-XYZ789"},
+            "broken_outlinks": ["https://example.com/missing-page"],
+        }
+    ]
+    evidence = [
+        {
+            "claim_type": "audit",
+            "source_url": "https://example.com/",
+            "timestamp": "2026-11-02T12:00:00Z",
+            "http_status": 200,
+            "dom_selector": "h1",
+            "verbatim_text": "Main Business Title",
+            "hash_sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a",
+        }
+    ]
+    links = [
+        {
+            "source_url": "https://example.com/",
+            "target_url": "https://example.com/services",
+            "anchor_text": "Our Services",
+            "placement": "header",
+            "is_nofollow": False,
+        }
+    ]
+
+    mgr = OutputManager(
+        output_dir=str(tmp_path / "excel_export"),
+        export_format="xlsx",
+        export_mode="single",
+    )
+    result = mgr.export_site_crawl(
+        target_domain="example.com",
+        pages=pages,
+        evidence_records=evidence,
+        link_edges=links,
+    )
+
+    assert "site_crawl_excel" in result
+    xlsx_path = Path(result["site_crawl_excel"])
+    assert xlsx_path.exists()
+
+    wb = openpyxl.load_workbook(str(xlsx_path))
+    expected_sheets = [
+        "Audit Summary",
+        "Pages Overview",
+        "SEO Issues",
+        "Headings",
+        "Internal Links & Broken",
+        "Images & Media",
+        "Structured Data & NAP",
+        "Social & Analytics",
+        "Evidence (EVD-01)",
+    ]
+    for s_name in expected_sheets:
+        assert s_name in wb.sheetnames, f"Expected sheet '{s_name}' missing from workbook"
+
+    # Verify atomic values in Headings sheet
+    ws_headings = wb["Headings"]
+    assert ws_headings.max_row >= 2
+    row2_vals = [ws_headings.cell(row=2, column=c).value for c in range(1, 6)]
+    assert row2_vals[0] == "https://example.com/"
+    assert row2_vals[1] == "H1"
+    assert row2_vals[3] == "Main Business Title"
+    # Ensure no JSON string dumped in any cell
+    for r in range(1, ws_headings.max_row + 1):
+        for c in range(1, ws_headings.max_column + 1):
+            val = str(ws_headings.cell(row=r, column=c).value or "")
+            assert not (val.startswith("{") and val.endswith("}")), f"Found JSON blob in {r},{c}: {val}"
+
+    # Test Citations Excel export
+    citations_data = [
+        {
+            "platform": "Google Business Profile",
+            "label": "Google Maps",
+            "url": "https://google.com/maps/place/test",
+            "status": "live",
+            "nap_match": "exact",
+            "phone": "(214) 555-0199",
+            "address": "123 Main St, Dallas, TX",
+            "business_name": "Test Plumbing Dallas",
+            "rating": 4.9,
+            "review_count": 87,
+            "claimed": True,
+            "evidence_id": "evd_1001",
+        }
+    ]
+    res_cit = mgr.export_citations(
+        business_name="Test Plumbing Dallas",
+        citations=citations_data,
+        evidence_records=evidence,
+    )
+    assert "citations_excel" in res_cit
+    wb_cit = openpyxl.load_workbook(res_cit["citations_excel"])
+    assert "Summary" in wb_cit.sheetnames
+    assert "Citations Overview" in wb_cit.sheetnames
+    assert "Secondary Phones & Badges" in wb_cit.sheetnames
+    assert "Evidence (EVD-01)" in wb_cit.sheetnames
+
+    # Test SERP Excel export
+    serp_data = {
+        "query": "plumber dallas",
+        "location": "Dallas, TX",
+        "local_pack": [
+            {
+                "position": 1,
+                "name": "Dallas 24/7 Plumbers",
+                "rating": 4.8,
+                "review_count": 120,
+                "categories": ["Plumber", "Emergency Service"],
+                "address_snippet": "Downtown Dallas",
+            }
+        ],
+        "organic": [
+            {
+                "position": 1,
+                "url": "https://example.com/",
+                "title": "Top Dallas Plumbers",
+                "snippet": "Local trusted plumbing services in Dallas.",
+            }
+        ],
+        "people_also_ask": [
+            {
+                "position": 1,
+                "question": "How much does a plumber cost in Dallas?",
+                "snippet": "Typical costs range from $150 to $400.",
+            }
+        ],
+    }
+    res_serp = mgr.export_serp(serp_data=serp_data, evidence_records=evidence)
+    assert "serp_excel" in res_serp
+    wb_serp = openpyxl.load_workbook(res_serp["serp_excel"])
+    assert "Query Summary" in wb_serp.sheetnames
+    assert "Local Pack" in wb_serp.sheetnames
+    assert "Local Pack Categories" in wb_serp.sheetnames
+    assert "Organic Rankings" in wb_serp.sheetnames
+    assert "People Also Ask (PAA)" in wb_serp.sheetnames
+
+
+def test_sqlite_source_of_truth_with_excel_export(tmp_path: Path) -> None:
+    """Verify SQLite serves as primary persistence and exports directly into multi-worksheet Excel."""
+    db_path = tmp_path / "canonical_truth.db"
+    storage = SQLiteStorage(db_path)
+
+    # Persist pages and link graph in SQLite
+    storage.save_page(
+        {
+            "url": "https://example.com/home",
+            "title": "Home Page",
+            "status_code": 200,
+            "word_count": 400,
+            "h1": ["Welcome Home"],
+        },
+        domain="example.com",
+    )
+    storage.save_page(
+        {
+            "url": "https://example.com/about",
+            "title": "About Us",
+            "status_code": 200,
+            "word_count": 250,
+            "h1": ["About Our Company"],
+        },
+        domain="example.com",
+    )
+    storage.save_internal_links_batch([
+        {
+            "source_url": "https://example.com/home",
+            "target_url": "https://example.com/about",
+            "anchor_text": "About Us",
+            "placement": "navigation",
+            "is_nofollow": False,
+        }
+    ])
+    storage.save_evidence_batch([
+        {
+            "claim_type": "audit",
+            "source_url": "https://example.com/home",
+            "timestamp": "2026-11-02T12:00:00Z",
+            "http_status": 200,
+            "dom_selector": "title",
+            "verbatim_text": "Home Page",
+            "hash_sha256": "abcdef1234567890",
+        }
+    ])
+
+    # Ensure SQLite retains everything
+    pages_in_db = storage.fetch_all_pages()
+    assert len(pages_in_db) == 2
+    links_in_db = storage.fetch_all_internal_links()
+    assert len(links_in_db) == 1
+
+    # Export from SQLite storage to Excel
+    out_mgr = OutputManager(
+        output_dir=str(tmp_path / "sqlite_excel_artifacts"),
+        export_format="xlsx",
+    )
+    artifacts = out_mgr.export_from_storage(storage, mode="competitor", meta={"domain": "example.com"})
+
+    assert "site_crawl_excel" in artifacts
+    wb = openpyxl.load_workbook(artifacts["site_crawl_excel"])
+    ws_links = wb["Internal Links & Broken"]
+    assert ws_links.max_row >= 2
+    # Verify link from SQLite graph is populated in Excel worksheet
+    assert ws_links.cell(row=2, column=1).value == "https://example.com/home"
+    assert ws_links.cell(row=2, column=2).value == "https://example.com/about"
+    assert ws_links.cell(row=2, column=3).value == "Internal Link"
+    assert ws_links.cell(row=2, column=4).value == "About Us"
+
+
+def test_clean_csv_export_without_json_blobs(tmp_path: Path) -> None:
+    """Verify CSV export sanitizes nested lists/dicts into clean scalar counts and summaries."""
+    pages = [
+        {
+            "url": "https://example.com/test",
+            "title": "Test Page",
+            "status_code": 200,
+            "h1": ["Primary Headline"],
+            "h2": ["Secondary Subtitle"],
+            "issues": [
+                {
+                    "url": "https://example.com/test",
+                    "severity": "critical",
+                    "category": "meta",
+                    "issue": "Missing Title",
+                    "details": "Page has empty title tag",
+                },
+                {
+                    "url": "https://example.com/test",
+                    "severity": "warning",
+                    "category": "content",
+                    "issue": "Thin Content",
+                    "details": "Word count below threshold",
+                },
+            ],
+            "nap_found": {"phones": ["123-456-7890"], "addresses": ["Dallas, TX"]},
+            "og_tags": {"og:title": "Social Headline"},
+        }
+    ]
+    mgr = OutputManager(
+        output_dir=str(tmp_path / "clean_csv"),
+        export_format="csv",
+        export_mode="single",
+    )
+    mgr.export_site_crawl(target_domain="example.com", pages=pages)
+    csv_file = tmp_path / "clean_csv" / "site_crawl_artifact.csv"
+    assert csv_file.exists()
+
+    content = csv_file.read_text(encoding="utf-8")
+    # Verify no raw json syntax like {"level": or [{"severity":
+    assert '{"level":' not in content
+    assert '[{"severity":' not in content
+    # Verify clean scalar summaries exist
+    assert "Primary Headline" in content
+    assert "123-456-7890" in content

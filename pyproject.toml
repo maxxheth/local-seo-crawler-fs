@@ -16,6 +16,7 @@ dependencies = [
     "redis>=5.0.0",
     "zstandard>=0.23.0",
     "pytest>=8.0.0",
+    "openpyxl>=3.1.5",
 ]
 
 [project.scripts]

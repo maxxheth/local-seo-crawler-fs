@@ -139,9 +139,9 @@ def build_parser(defaults: dict[str, object]) -> argparse.ArgumentParser:
         "--export-format",
         dest="export_format",
         type=str,
-        choices=["json", "yaml", "csv"],
+        choices=["json", "yaml", "csv", "xlsx", "excel"],
         default=str(defaults.get("export_format", "json")),
-        help="Output serialization format: json, yaml, or csv [default: json]",
+        help="Output serialization format: json, yaml, csv, or xlsx/excel [default: json]",
     )
     parser.add_argument(
         "--export-mode",

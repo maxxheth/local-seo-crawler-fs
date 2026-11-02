@@ -32,8 +32,7 @@ class SQLiteStorage:
     def _init_db(self) -> None:
         with self._get_connection() as conn:
             conn.executescript("""
-            CREATE TABLE IF NOT EXISTS crawl_metadata (
-                key TEXT PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS crawl_metadata (\n                key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
 
@@ -360,6 +359,24 @@ class SQLiteStorage:
         with self._get_connection() as conn:
             rows = conn.execute("SELECT raw_json FROM pages ORDER BY rowid ASC").fetchall()
             return [json.loads(r["raw_json"]) for r in rows]
+
+    def fetch_all_internal_links(self) -> list[dict[str, Any]]:
+        """Fetch all stored internal link edges with status and anchor text."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT source_url, target_url, anchor_text, placement, is_nofollow, target_status FROM internal_links ORDER BY id ASC"
+            ).fetchall()
+            return [
+                {
+                    "source_url": r["source_url"],
+                    "target_url": r["target_url"],
+                    "anchor_text": r["anchor_text"] or "",
+                    "placement": r["placement"] or "body",
+                    "is_nofollow": bool(r["is_nofollow"]),
+                    "target_status": r["target_status"],
+                }
+                for r in rows
+            ]
 
     def fetch_all_citations(self) -> list[dict[str, Any]]:
         with self._get_connection() as conn:
