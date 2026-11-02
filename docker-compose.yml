@@ -11,13 +11,22 @@ services:
       - "${FLARESOLVERR_PORT:-8193}:8193"
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: local-seo-crawler-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    restart: unless-stopped
+
   crawler:
     build: .
     container_name: local-seo-crawler
     depends_on:
       - flaresolverr
+      - redis
     environment:
       - FLARESOLVERR_URL=http://flaresolverr:8193
+      - REDIS_URL=redis://redis:6379/0
       - PROXY_FILE=proxies.txt
       - OUTPUT_DIR=artifacts
     volumes:

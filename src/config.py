@@ -5,7 +5,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
 from dotenv import load_dotenv
+
+
+def _parse_bool(val: str | None, default: bool = True) -> bool:
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
 
 
 def load_config() -> dict[str, Any]:
@@ -23,7 +31,26 @@ def load_config() -> dict[str, Any]:
     output_dir = os.getenv("OUTPUT_DIR", str(project_root / "artifacts"))
     concurrency = int(os.getenv("CONCURRENCY", "4"))
     max_retries = int(os.getenv("MAX_RETRIES", "3"))
+    max_pages = int(os.getenv("MAX_PAGES", "1000"))
+    max_depth = int(os.getenv("MAX_DEPTH", "5"))
+    chunk_size = int(os.getenv("CHUNK_SIZE", "15"))
     log_level = os.getenv("LOG_LEVEL", "INFO")
+
+    # Mode & feature toggles
+    enable_competitor = _parse_bool(os.getenv("ENABLE_COMPETITOR"), default=True)
+    use_sitemap = _parse_bool(os.getenv("USE_SITEMAP"), default=True)
+    fast_http_first = _parse_bool(os.getenv("FAST_HTTP_FIRST"), default=True)
+
+    # Queue & storage settings
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    sqlite_db_name = os.getenv("SQLITE_DB_NAME", "crawl_results.db").strip()
+
+    # Export & archive settings
+    export_format = os.getenv("EXPORT_FORMAT", "json").strip().lower()
+    export_mode = os.getenv("EXPORT_MODE", "single").strip().lower()
+    export_chunk_size = int(os.getenv("EXPORT_CHUNK_SIZE", "250"))
+    archive_format = os.getenv("ARCHIVE_FORMAT", "none").strip().lower()
+    tar_compression = os.getenv("TAR_COMPRESSION", "gz").strip().lower()
 
     return {
         "project_root": str(project_root),
@@ -33,7 +60,20 @@ def load_config() -> dict[str, Any]:
         "output_dir": output_dir,
         "concurrency": concurrency,
         "max_retries": max_retries,
+        "max_pages": max_pages,
+        "max_depth": max_depth,
+        "chunk_size": chunk_size,
         "log_level": log_level,
+        "enable_competitor": enable_competitor,
+        "use_sitemap": use_sitemap,
+        "fast_http_first": fast_http_first,
+        "redis_url": redis_url,
+        "sqlite_db_name": sqlite_db_name,
+        "export_format": export_format,
+        "export_mode": export_mode,
+        "export_chunk_size": export_chunk_size,
+        "archive_format": archive_format,
+        "tar_compression": tar_compression,
     }
 
 
@@ -62,7 +102,6 @@ def extract_proxy_port(proxy_url: str | None) -> int | None:
     if not proxy_url:
         return None
     try:
-        from urllib.parse import urlparse
         parsed = urlparse(proxy_url if "://" in proxy_url else f"http://{proxy_url}")
         return parsed.port
     except Exception:

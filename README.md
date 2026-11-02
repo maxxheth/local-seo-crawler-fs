@@ -1,13 +1,15 @@
 # Local SEO Crawler FS (`local-seo-crawler-fs`)
 
-High-throughput, concurrent CLI scraper orchestrating worker slots and deterministic parsing in **Python**.
+High-throughput, concurrent multi-source Local SEO scraper orchestrating worker slots and deterministic parsing in **Python**. Optimized for large site crawls (1,000+ pages) with chunked frontier queues, SQLite storage checkpoints, fast-HTTP escalation, and multi-format archiving.
 
 ## Architecture
 
 ```
                  Concurrent Orchestrator (src/orchestrator.py)
+                     │ ├── FrontierQueue (src/queue.py) [SQLite / Redis]
                      │ ├── SessionPool (src/session_pool.py) [threading.Lock]
-                     │ └── Worker Queue & Retry State Machine
+                     │ ├── Sitemap & Robots Seeder (src/sitemap.py)
+                     │ └── SQLite Result Storage (src/storage.py) [WAL Mode]
                      ▼
           Core Scraper Module (src/scraper.py)
                      │
@@ -15,24 +17,26 @@ High-throughput, concurrent CLI scraper orchestrating worker slots and determini
          ▼                          ▼
  FlareSolverr Client        Pluggable Adapters (src/adapters/)
  (src/flaresolverr.py)      ├── CitationAdapter (Yelp, BBB, YellowPages)
-         │                  ├── CompetitorSiteAdapter (Core 30 on-site)
+         │                  ├── CompetitorSiteAdapter (On-site 1,000+ pages)
          ▼                  └── LocalSerpAdapter (Google 3-Pack, SERP)
 FlareSolverr Container              │
 (Headless Chromium + Proxies)       ▼
                             Output Manager (src/output.py)
-                            ├── citations_manifest.json
-                            ├── site_crawl_artifact.json
-                            ├── serp_artifact.json
-                            └── evidence_manifest.json (EVD-01)
+                            ├── SQLite DB: crawl_results.db
+                            ├── Single / Multi-Part JSON, YAML, CSV
+                            └── Archives: .zip, .tar.gz, .tar.bz2, .tar.xz, .tar.zst
 ```
 
-- **Concurrent Orchestrator (`src/orchestrator.py`, `src/session_pool.py`):** Worker pool management (`ThreadPoolExecutor`), sliding-window task scheduling, thread-safe `SessionSlot` proxy leasing, and session recycling retry state machine.
-- **Core Scraper & Parsers (`src/scraper.py`, `src/adapters/`):** FlareSolverr `/v1` HTTP protocol, HTML rendering extraction using `scrapling` and `selectolax` (lexbor engine), Pydantic schemas, and deterministic JSON export.
+- **Frontier Queue (`src/queue.py`):** Hybrid queue supporting SQLite (default, zero-config) and Redis (`REDIS_URL` for multi-worker distributed setups) with atomic URL deduplication and chunked popping.
+- **Fast-HTTP Escalation & Session Recycling:** Scrapers use keep-alive `httpx.Client` connections and escalate to FlareSolverr only when encountering Cloudflare/CAPTCHA challenges, caching solved `cf_clearance` cookies across the worker's chunk.
+- **Incremental SQLite Checkpoints (`src/storage.py`):** Results and evidence are committed to SQLite (`WAL` mode) incrementally after each page/chunk, enabling resumable crawls and minimal memory consumption.
+- **Configurable Multi-Format Exporter (`src/output.py`):** Supports `json`, `yaml`, and `csv` export in `single` or `chunked`/`multi`-file splits, with automated archiving in `zip` or `tar` (compressed with `gz`, `bz2`, `xz`, `zst`, or uncompressed).
 
 ## Requirements
 
 - **Python 3.10+** (managed via `uv`)
 - **FlareSolverr** running on `http://localhost:8193` (or configured via `FLARESOLVERR_URL`)
+- *(Optional)* **Redis** for distributed queue scaling
 
 ## Quickstart
 
@@ -42,24 +46,50 @@ uv venv .venv
 source .venv/bin/activate
 uv pip install -e .
 
-# 2. Start FlareSolverr (via Docker Compose)
-docker compose up -d flaresolverr
+# 2. Start FlareSolverr & Redis (via Docker Compose)
+docker compose up -d
 
 # 3. Verify citations concurrently
 local-seo-crawler --mode citations --input citations.json --concurrency 4 --output-dir ./artifacts
 
-# 4. Audit competitor domain
-local-seo-crawler --mode competitor --domain competitor.com --concurrency 3 --output-dir ./artifacts
+# 4. Large-scale competitor crawl (1,000+ pages with sitemap seeding, chunking, and tar.gz export)
+local-seo-crawler --mode competitor --domain competitor.com \
+  --max-pages 1500 \
+  --chunk-size 20 \
+  --concurrency 6 \
+  --export-format json \
+  --export-mode multi \
+  --export-chunk-size 250 \
+  --archive-format tar \
+  --tar-compression gz \
+  --output-dir ./artifacts
 
 # 5. Local 3-Pack & entity test
 local-seo-crawler --mode serp --query "drain cleaning dallas" --location "Dallas, TX" --output-dir ./artifacts
 ```
 
+## Configuration & Environment Variables
+
+You can configure options in `.env` or pass CLI flags:
+
+| Parameter | CLI Flag | Env Var | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **Competitor Mode Toggle** | `--disable-competitor` | `ENABLE_COMPETITOR` | `true` | Toggle competitor crawling mode on or off |
+| **Max Pages** | `--max-pages` | `MAX_PAGES` | `1000` | Target page cap for site crawl |
+| **Max Depth** | `--max-depth` | `MAX_DEPTH` | `5` | Maximum crawl link depth |
+| **Chunk Size** | `--chunk-size` | `CHUNK_SIZE` | `15` | Number of URLs assigned per worker batch |
+| **Sitemap Seeding** | `--no-sitemap` | `USE_SITEMAP` | `true` | Auto-discover `robots.txt` and `sitemap.xml` |
+| **Fast HTTP First** | `--no-fast-http` | `FAST_HTTP_FIRST` | `true` | Try direct/proxy HTTP before FlareSolverr |
+| **Queue Backend** | `--redis-url` | `REDIS_URL` | `""` (SQLite) | Set Redis connection string for distributed queue |
+| **Export Format** | `--export-format` | `EXPORT_FORMAT` | `json` | `json`, `yaml`, or `csv` |
+| **Export Mode** | `--export-mode` | `EXPORT_MODE` | `single` | `single`, `multi`, or `chunked` |
+| **Export Chunk Size** | `--export-chunk-size`| `EXPORT_CHUNK_SIZE`| `250` | Record count per part file in multi mode |
+| **Archive Format** | `--archive-format` | `ARCHIVE_FORMAT` | `none` | `none`, `zip`, or `tar` |
+| **Tar Compression** | `--tar-compression` | `TAR_COMPRESSION` | `gz` | `gz`, `bz2`, `xz`, `zst`, or `none` |
+
 ## Running Tests
 
 ```bash
 source .venv/bin/activate
-
-# Run adapter, schema, orchestrator, and session pool unit tests
 pytest -v
 ```

@@ -1,6 +1,6 @@
 [project]
 name = "local-seo-crawler-fs"
-version = "0.1.0"
+version = "0.2.0"
 description = "High-throughput concurrent multi-source Local SEO scraper"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,9 @@ dependencies = [
     "pydantic>=2.14.0",
     "rich>=14.0.0",
     "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.1",
+    "redis>=5.0.0",
+    "zstandard>=0.23.0",
     "pytest>=8.0.0",
 ]
 

@@ -200,7 +200,7 @@ def test_citation_adapter_blocked():
 
 def test_competitor_site_adapter():
     adapter = CompetitorSiteAdapter()
-    record, evidence_list = adapter.parse(
+    record, evidence_list, discovered_urls = adapter.parse(
         url="https://competitor.com/drain-cleaning-dallas/",
         html=SAMPLE_COMPETITOR_HTML,
         http_status=200,
@@ -218,6 +218,7 @@ def test_competitor_site_adapter():
     assert record.internal_outlinks_count == 2
     assert record.external_outlinks_count == 1
     assert any("service-areas" in u for u in record.internal_urls)
+    assert len(discovered_urls) >= 2
     assert "LocalBusiness" in record.schema_types
     assert len(record.nap_found.phones) > 0
     assert len(evidence_list) == 1

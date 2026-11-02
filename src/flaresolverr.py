@@ -20,6 +20,7 @@ class FlareSolverrResponse:
     html: str = ""
     final_url: str = ""
     cookies: list[dict[str, Any]] = field(default_factory=list)
+    user_agent: str | None = None
     error: str | None = None
     solution: dict[str, Any] | None = None
 
@@ -138,6 +139,7 @@ class FlareSolverrClient:
         result.solution = solution
         result.status = solution.get("status", 200)
         result.cookies = solution.get("cookies", [])
+        result.user_agent = solution.get("userAgent")
         result.html = solution.get("response", "")
         result.final_url = solution.get("url", url)
         return result

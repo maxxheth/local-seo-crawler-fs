@@ -12,6 +12,7 @@ from urllib.parse import urljoin, urlparse
 from selectolax.lexbor import LexborHTMLParser as HTMLParser
 
 from src.models import EvidenceRecord, FoundNAP, PageTechnicalRecord
+from src.sitemap import is_internal_url, normalize_url
 
 PHONE_PATTERN = re.compile(
     r"(?:(?:\+?1\s*(?:[.-]\s*)?)?(?:\(\s*([2-9]1[02-9]|[2-9][02-8]1|[2-9][02-8][02-9])\s*\)|([2-9]1[02-9]|[2-9][02-8]1|[2-9][02-8][02-9]))\s*(?:[.-]\s*)?)?([2-9]1[02-9]|[2-9][02-9]1|[2-9][02-9]{2})\s*(?:[.-]\s*)?([0-9]{4})",
@@ -33,7 +34,12 @@ class CompetitorSiteAdapter:
         http_status: int = 200,
         final_url: str | None = None,
         raw_pre_js_html: str | None = None,
-    ) -> tuple[PageTechnicalRecord, list[EvidenceRecord]]:
+    ) -> tuple[PageTechnicalRecord, list[EvidenceRecord], list[str]]:
+        """Parse competitor page.
+
+        Returns:
+            (record, evidence_list, all_discovered_internal_urls)
+        """
         timestamp = datetime.now(timezone.utc).isoformat()
         parsed_url = urlparse(url)
         base_domain = parsed_url.netloc.lower()
@@ -70,7 +76,7 @@ class CompetitorSiteAdapter:
                     hash_sha256=compute_sha256(f"Empty content - HTTP {http_status}"),
                 )
             ]
-            return empty_record, evidence
+            return empty_record, evidence, []
 
         tree = HTMLParser(html)
 
@@ -145,7 +151,7 @@ class CompetitorSiteAdapter:
                 if type_name:
                     schema_types.add(type_name)
 
-        # 4. Outlink analysis & Internal Link Discovery
+        # 4. Outlink analysis & Internal Link Discovery (without artificial 50-limit on discovery)
         internal_count = 0
         external_count = 0
         discovered_internal: list[str] = []
@@ -153,17 +159,17 @@ class CompetitorSiteAdapter:
 
         for a_tag in tree.css("a[href]"):
             href = a_tag.attributes.get("href", "").strip()
-            if not href or href.startswith(("#", "javascript:", "mailto:", "tel:")):
+            if not href or href.startswith(("#", "javascript:", "mailto:", "tel:", "data:")):
                 continue
-            full_link = urljoin(url, href).split("#")[0]
-            link_parsed = urlparse(full_link)
-            link_domain = link_parsed.netloc.lower()
+            normalized_link = normalize_url(href, base_url=url)
+            if not normalized_link:
+                continue
 
-            if link_domain == base_domain or not link_domain:
+            if is_internal_url(normalized_link, base_domain):
                 internal_count += 1
-                if full_link not in seen_hrefs and (link_parsed.scheme in ("http", "https")):
-                    seen_hrefs.add(full_link)
-                    discovered_internal.append(full_link)
+                if normalized_link not in seen_hrefs:
+                    seen_hrefs.add(normalized_link)
+                    discovered_internal.append(normalized_link)
             else:
                 external_count += 1
 
@@ -180,7 +186,6 @@ class CompetitorSiteAdapter:
             raw_body = raw_tree.css_first("body")
             raw_text = raw_body.text() if raw_body else ""
             raw_words = len([w for w in re.findall(r"\b\w+\b", raw_text) if len(w) > 1])
-            # If raw HTML has < 15% of the rendered words, it is client-rendered only (CSR)
             if word_count > 100 and (raw_words / max(word_count, 1)) < 0.15:
                 is_ssr = False
 
@@ -199,7 +204,6 @@ class CompetitorSiteAdapter:
             if len(re.sub(r"\D", "", matched)) >= 10:
                 found_phones.add(matched)
 
-        # Addresses from semantic elements or footer
         footer = tree.css_first("footer")
         if footer:
             for addr_tag in footer.css("address, .address"):
@@ -220,7 +224,7 @@ class CompetitorSiteAdapter:
             word_count=word_count,
             internal_outlinks_count=internal_count,
             external_outlinks_count=external_count,
-            internal_urls=discovered_internal[:50],
+            internal_urls=discovered_internal[:50],  # Keep per-page stored artifact capped at 50
             schema_types=sorted(list(schema_types)),
             schema_jsonld=schema_jsonld,
             nap_found=FoundNAP(
@@ -242,4 +246,5 @@ class CompetitorSiteAdapter:
             )
         ]
 
-        return record, evidence
+        # Return full discovered list for orchestrator frontier expansion
+        return record, evidence, discovered_internal
