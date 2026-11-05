@@ -76,6 +76,7 @@ def _process_chunk_worker(
                 "query",
                 "location",
                 "domain",
+                "preserve_trailing_slash",
             ):
                 if k in target_info:
                     req_job[k] = target_info[k]
@@ -117,6 +118,7 @@ def _process_chunk_worker(
                             "mode": "competitor",
                             "depth": cur_depth + 1,
                             "retries": 0,
+                            "preserve_trailing_slash": target_info.get("preserve_trailing_slash", True),
                         })
             else:
                 errors_encountered += 1
@@ -179,6 +181,8 @@ class CrawlerOrchestrator:
         archive_format: str = "none",
         tar_compression: str = "gz",
         enable_competitor: bool = True,
+        preserve_trailing_slash: bool = True,
+        verify_all_links: bool = False,
         # SEO Audit thresholds
         title_min_len: int = 30,
         title_max_len: int = 60,
@@ -208,6 +212,8 @@ class CrawlerOrchestrator:
         self.fast_http_first = fast_http_first
         self.redis_url = redis_url
         self.enable_competitor = enable_competitor
+        self.preserve_trailing_slash = preserve_trailing_slash
+        self.verify_all_links = verify_all_links
 
         # Output & Archiving parameters
         self.export_format = export_format
@@ -289,7 +295,10 @@ class CrawlerOrchestrator:
             t["mode"] = self.mode
 
         completed_urls = self.storage.get_completed_urls(self.mode)
+        self.queue.reconcile(completed_urls)
         fresh_targets = [t for t in initial_targets if t.get("url") not in completed_urls]
+        for t in fresh_targets:
+            t["preserve_trailing_slash"] = self.preserve_trailing_slash
 
         self.queue.push_targets(fresh_targets)
 
@@ -372,6 +381,7 @@ class CrawlerOrchestrator:
                         "slot_idx": slot_idx,
                         "worker_id": worker_id,
                         "chunk_size": len(chunk),
+                        "chunk": chunk,
                     }
                     in_flight_pages += len(chunk)
 
@@ -401,7 +411,16 @@ class CrawlerOrchestrator:
                         self.pool.update_session(worker_id, slot_idx, final_sess_id)
                         self.pool.release_slot(worker_id, slot_idx)
 
+                        # Mark chunk URLs as done in queue
+                        chunk_urls = [
+                            item.get("url") or item.get("target", {}).get("url", "")
+                            for item in slot_meta.get("chunk", [])
+                        ]
+                        self.queue.mark_done([u for u in chunk_urls if u])
+
                         if retry_targets:
+                            for rt in retry_targets:
+                                rt["preserve_trailing_slash"] = self.preserve_trailing_slash
                             self.queue.push_targets(retry_targets, allow_seen=True)
 
                         # Save link edges into SQLite
@@ -439,13 +458,29 @@ class CrawlerOrchestrator:
                             for link_info in discovered_links:
                                 u_str = str(link_info.get("url", ""))
                                 depth = int(link_info.get("depth", 0))
-                                if depth <= self.max_depth and is_internal_url(u_str, self.domain):
+                                if depth <= self.max_depth and is_internal_url(u_str, self.domain, preserve_trailing_slash=self.preserve_trailing_slash):
+                                    link_info["preserve_trailing_slash"] = self.preserve_trailing_slash
                                     valid_new.append(link_info)
                             if valid_new:
                                 self.queue.push_targets(valid_new)
 
         # Post-Crawl Graph & Duplication Analysis Pass for competitor mode
         if self.mode == "competitor":
+            # If verify_all_links enabled, inspect any unvisited link targets
+            if self.verify_all_links:
+                unvisited = self.storage.get_unvisited_link_targets()
+                if unvisited:
+                    print(f"Verifying {len(unvisited)} unvisited link targets (--verify-all-links)...")
+                    status_map: dict[str, int] = {}
+                    with httpx.Client(timeout=10.0, follow_redirects=True, headers=dict(scraper.DEFAULT_HEADERS)) as v_client:
+                        for u_target in unvisited:
+                            try:
+                                v_res = v_client.get(u_target)
+                                status_map[u_target] = v_res.status_code
+                            except Exception:
+                                status_map[u_target] = 500
+                    self.storage.update_link_target_statuses(status_map)
+
             print("Analyzing site link graph and checking for near-duplicate pages...")
             raw_pages = self.storage.fetch_all_pages()
             page_objs = [PageTechnicalRecord(**p) for p in raw_pages]

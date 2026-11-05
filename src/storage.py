@@ -211,11 +211,14 @@ class SQLiteStorage:
     def post_crawl_sync(self, duplicate_issues: dict[str, SEOIssue] | None = None) -> None:
         """Run post-crawl link status backfill, compute inlinks, and update pages with broken links."""
         with self._get_connection() as conn:
-            # 1. Backfill target_status on internal_links from pages table
+            # 1. Backfill target_status on internal_links from pages table (exact or trailing-slash matched)
             conn.execute("""
             UPDATE internal_links
             SET target_status = (
-                SELECT p.status_code FROM pages p WHERE p.url = internal_links.target_url
+                SELECT p.status_code FROM pages p
+                WHERE p.url = internal_links.target_url
+                   OR rtrim(p.url, '/') = rtrim(internal_links.target_url, '/')
+                LIMIT 1
             )
             WHERE target_status IS NULL
             """)
@@ -377,6 +380,24 @@ class SQLiteStorage:
                 }
                 for r in rows
             ]
+
+    def get_unvisited_link_targets(self) -> list[str]:
+        """Fetch distinct target URLs in internal_links where target_status is still NULL."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT target_url FROM internal_links WHERE target_status IS NULL"
+            ).fetchall()
+            return [r["target_url"] for r in rows if r["target_url"]]
+
+    def update_link_target_statuses(self, status_map: dict[str, int]) -> None:
+        """Update target_status for specific target URLs."""
+        if not status_map:
+            return
+        with self._get_connection() as conn:
+            conn.executemany(
+                "UPDATE internal_links SET target_status = ? WHERE target_url = ?",
+                [(status, url) for url, status in status_map.items()],
+            )
 
     def fetch_all_citations(self) -> list[dict[str, Any]]:
         with self._get_connection() as conn:

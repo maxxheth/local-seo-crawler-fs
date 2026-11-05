@@ -54,9 +54,17 @@ IGNORED_EXTENSIONS = {
     ".json",
 }
 
+IGNORED_PATH_PREFIXES = (
+    "/cdn-cgi/",
+)
 
-def normalize_url(url: str, base_url: str | None = None) -> str | None:
-    """Normalize and canonicalize URL: lowercase host, strip fragment, strip tracking params, trailing slashes."""
+
+def normalize_url(
+    url: str,
+    base_url: str | None = None,
+    preserve_trailing_slash: bool = True,
+) -> str | None:
+    """Normalize and canonicalize URL: lowercase host, strip fragment, strip tracking params, normalize slashes."""
     if not url:
         return None
     url = url.strip()
@@ -83,10 +91,14 @@ def normalize_url(url: str, base_url: str | None = None) -> str | None:
         netloc = netloc[:-4]
 
     path = parsed.path or "/"
-    # Check ignored extensions
     path_lower = path.lower()
+    # Check ignored extensions
     for ext in IGNORED_EXTENSIONS:
         if path_lower.endswith(ext):
+            return None
+
+    for prefix in IGNORED_PATH_PREFIXES:
+        if path_lower.startswith(prefix) or path_lower == prefix.rstrip("/"):
             return None
 
     # Filter tracking query parameters
@@ -98,17 +110,29 @@ def normalize_url(url: str, base_url: str | None = None) -> str | None:
     query_parts.sort(key=lambda x: x[0])
     query = urlencode(query_parts) if query_parts else ""
 
-    # Normalize trailing slash: collapse multi-slashes
+    # Normalize slashes: collapse multi-slashes
     path = re.sub(r"/{2,}", "/", path)
-    if path != "/" and path.endswith("/"):
+    if not path:
+        path = "/"
+    elif not preserve_trailing_slash and path != "/" and path.endswith("/"):
         path = path.rstrip("/")
 
     return urlunparse((scheme, netloc, path, "", query, ""))
 
 
-def is_internal_url(url: str, target_domain: str) -> bool:
+def canonical_url_key(url: str) -> str:
+    """Loose canonical key for equivalence checks: normalizes without trailing slash."""
+    if not url:
+        return ""
+    norm = normalize_url(url, preserve_trailing_slash=False)
+    if not norm:
+        return url.strip().rstrip("/")
+    return norm.rstrip("/")
+
+
+def is_internal_url(url: str, target_domain: str, preserve_trailing_slash: bool = True) -> bool:
     """Check if URL belongs to the target domain (matching or subdomain/apex)."""
-    norm_url = normalize_url(url)
+    norm_url = normalize_url(url, preserve_trailing_slash=preserve_trailing_slash)
     if not norm_url:
         return False
     parsed = urlparse(norm_url)

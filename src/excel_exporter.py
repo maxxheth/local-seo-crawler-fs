@@ -520,6 +520,11 @@ def write_site_crawl_excel(
         "Missing Alt Count",
         "Decorative Alt Count",
         "Missing Dimensions Count",
+        "WebP Count",
+        "AVIF Count",
+        "JPG Count",
+        "PNG Count",
+        "SVG Count",
         "Sample Missing Alt Image URL",
     ]
     for c_idx, h in enumerate(img_headers, start=1):
@@ -537,7 +542,12 @@ def write_site_crawl_excel(
                 _style_status_cell(c_missing, "warning")
             ws_images.cell(row=im_row, column=4, value=img_info.decorative_alt_count)
             ws_images.cell(row=im_row, column=5, value=img_info.missing_dimensions_count)
-            ws_images.cell(row=im_row, column=6, value=sample_img)
+            ws_images.cell(row=im_row, column=6, value=img_info.webp_count)
+            ws_images.cell(row=im_row, column=7, value=img_info.avif_count)
+            ws_images.cell(row=im_row, column=8, value=img_info.jpg_count)
+            ws_images.cell(row=im_row, column=9, value=img_info.png_count)
+            ws_images.cell(row=im_row, column=10, value=img_info.svg_count)
+            ws_images.cell(row=im_row, column=11, value=sample_img)
             im_row += 1
 
     _apply_table_styling(ws_images, start_row=1)
@@ -569,12 +579,35 @@ def write_site_crawl_excel(
             ws_schema.cell(row=s_row, column=4, value="DOM tel: link or regex match")
             s_row += 1
 
+        # Found NAP: Tel Links
+        for tel_l in getattr(p.nap_found, "tel_links", []):
+            ws_schema.cell(row=s_row, column=1, value=p.url)
+            ws_schema.cell(row=s_row, column=2, value="Tel Link")
+            ws_schema.cell(row=s_row, column=3, value=tel_l)
+            ws_schema.cell(row=s_row, column=4, value="HTML <a href='tel:...'>")
+            s_row += 1
+
         # Found NAP: Addresses
         for addr in p.nap_found.addresses:
             ws_schema.cell(row=s_row, column=1, value=p.url)
             ws_schema.cell(row=s_row, column=2, value="Found Address")
             ws_schema.cell(row=s_row, column=3, value=addr)
             ws_schema.cell(row=s_row, column=4, value="DOM address tag")
+            s_row += 1
+
+        # Found NAP: Maps links & embed coords
+        for map_l in getattr(p.nap_found, "map_links", []):
+            ws_schema.cell(row=s_row, column=1, value=p.url)
+            ws_schema.cell(row=s_row, column=2, value="Map Link / Embed")
+            ws_schema.cell(row=s_row, column=3, value=map_l)
+            ws_schema.cell(row=s_row, column=4, value="Google Maps Link or iframe")
+            s_row += 1
+
+        for coord in getattr(p.nap_found, "map_embed_coords", []):
+            ws_schema.cell(row=s_row, column=1, value=p.url)
+            ws_schema.cell(row=s_row, column=2, value="Map Embed Coords")
+            ws_schema.cell(row=s_row, column=3, value=coord)
+            ws_schema.cell(row=s_row, column=4, value="Extracted Lat,Lng")
             s_row += 1
 
         # Hreflang

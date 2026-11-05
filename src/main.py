@@ -177,6 +177,20 @@ def build_parser(defaults: dict[str, object]) -> argparse.ArgumentParser:
 
     # Configurable SEO Audit Threshold Flags
     parser.add_argument(
+        "--preserve-trailing-slash",
+        dest="preserve_trailing_slash",
+        action=argparse.BooleanOptionalAction,
+        default=bool(defaults.get("preserve_trailing_slash", True)),
+        help="Preserve trailing slashes in normalized URLs (supports --preserve-trailing-slash / --no-preserve-trailing-slash) [default: True]",
+    )
+    parser.add_argument(
+        "--verify-all-links",
+        dest="verify_all_links",
+        action="store_true",
+        default=bool(defaults.get("verify_all_links", False)),
+        help="Perform HTTP verification for unvisited internal link targets after crawling [default: False]",
+    )
+    parser.add_argument(
         "--title-min-len",
         dest="title_min_len",
         type=int,
@@ -309,6 +323,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         archive_format=args.archive_format,
         tar_compression=args.tar_compression,
         enable_competitor=args.enable_competitor,
+        preserve_trailing_slash=args.preserve_trailing_slash,
+        verify_all_links=args.verify_all_links,
         title_min_len=args.title_min_len,
         title_max_len=args.title_max_len,
         desc_min_len=args.desc_min_len,

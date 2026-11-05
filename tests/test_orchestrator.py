@@ -16,7 +16,7 @@ from src.output import OutputManager
 from src.queue import SQLiteFrontierQueue
 from src.seo_auditor import SEOAuditConfig, audit_page, detect_duplicate_pages
 from src.session_pool import SessionPool, SessionSlot
-from src.sitemap import is_internal_url, normalize_url
+from src.sitemap import canonical_url_key, is_internal_url, normalize_url
 from src.storage import SQLiteStorage
 
 
@@ -56,7 +56,12 @@ def test_session_pool_acquisition_and_release() -> None:
 
 
 def test_url_normalization() -> None:
-    assert normalize_url("https://example.com/test/?utm_source=google&ref=123#section") == "https://example.com/test"
+    assert normalize_url("https://example.com/test/?utm_source=google&ref=123#section") == "https://example.com/test/"
+    assert (
+        normalize_url("https://example.com/test/?utm_source=google&ref=123#section", preserve_trailing_slash=False)
+        == "https://example.com/test"
+    )
+    assert canonical_url_key("https://example.com/test/") == "https://example.com/test"
     assert normalize_url("https://example.com/IMAGE.JPG") is None
     assert is_internal_url("https://sub.example.com/page", "example.com") is True
     assert is_internal_url("https://another.com/page", "example.com") is False

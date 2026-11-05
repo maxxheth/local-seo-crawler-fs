@@ -27,6 +27,16 @@ PHONE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+ADDRESS_REGEX = re.compile(
+    r"\b\d{1,5}\s+[A-Za-z0-9\s.,#-]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Trail|Trl|Way|Court|Ct|Circle|Cir|Suite|Ste|Pkwy|Parkway)\b[^\n,]*,\s*[A-Za-z\s]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?",
+    re.IGNORECASE,
+)
+
+BARE_DOMAIN_PATTERN = re.compile(
+    r"^(?:www\.[a-zA-Z0-9.-]+|[a-zA-Z0-9-]+\.(?:com|org|net|edu|gov|io|co|us|biz|info|tv|me)(?:[/:?#]|$))",
+    re.IGNORECASE,
+)
+
 GA4_PATTERN = re.compile(r"G-[A-Z0-9]{10}")
 GTM_PATTERN = re.compile(r"GTM-[A-Z0-9]+")
 
@@ -130,6 +140,18 @@ class CompetitorSiteAdapter:
         raw_pre_js_html: str | None = None,
         response_time_ms: int = 0,
         page_size_bytes: int = 0,
+        initial_status_code: int = 200,
+        redirect_chain: list[str] | None = None,
+        redirect_target_status: int | None = None,
+        content_type: str = "",
+        transport_error: str = "",
+        fetch_method: str = "fast_http",
+        ttfb_ms: int = 0,
+        server_header: str = "",
+        cache_status: str = "",
+        x_robots_tag: str = "",
+        in_sitemap: bool = False,
+        preserve_trailing_slash: bool = True,
     ) -> tuple[PageTechnicalRecord, list[EvidenceRecord], list[str], list[InternalLinkEdge]]:
         """Parse competitor page.
 
@@ -147,6 +169,17 @@ class CompetitorSiteAdapter:
                 url=url,
                 final_url=effective_final_url,
                 status_code=http_status,
+                initial_status_code=initial_status_code,
+                redirect_chain=redirect_chain or [],
+                redirect_target_status=redirect_target_status,
+                content_type=content_type,
+                transport_error=transport_error,
+                fetch_method=fetch_method,
+                ttfb_ms=ttfb_ms,
+                server_header=server_header,
+                cache_status=cache_status,
+                x_robots_tag=x_robots_tag,
+                in_sitemap=in_sitemap,
                 title="",
                 meta_description="",
                 canonical_url="",
@@ -305,6 +338,11 @@ class CompetitorSiteAdapter:
         decorative_alt = 0
         missing_dims = 0
         sample_missing_alts: list[str] = []
+        webp_count = 0
+        avif_count = 0
+        jpg_count = 0
+        png_count = 0
+        svg_count = 0
 
         for img in tree.css("img"):
             total_images += 1
@@ -322,12 +360,37 @@ class CompetitorSiteAdapter:
             if not (has_width and has_height):
                 missing_dims += 1
 
+            clean_src = src_val.lower().split("?")[0]
+            if clean_src.endswith(".webp"):
+                webp_count += 1
+            elif clean_src.endswith(".avif"):
+                avif_count += 1
+            elif clean_src.endswith((".jpg", ".jpeg")):
+                jpg_count += 1
+            elif clean_src.endswith(".png"):
+                png_count += 1
+            elif clean_src.endswith(".svg"):
+                svg_count += 1
+
+        for picture_source in tree.css("picture source"):
+            type_attr = (picture_source.attributes.get("type") or "").lower()
+            srcset = (picture_source.attributes.get("srcset") or "").lower().split("?")[0]
+            if "webp" in type_attr or srcset.endswith(".webp"):
+                webp_count += 1
+            elif "avif" in type_attr or srcset.endswith(".avif"):
+                avif_count += 1
+
         img_audit = ImageAuditSummary(
             total_images=total_images,
             missing_alt_count=missing_alt,
             decorative_alt_count=decorative_alt,
             missing_dimensions_count=missing_dims,
             missing_alt_sample_urls=sample_missing_alts,
+            webp_count=webp_count,
+            avif_count=avif_count,
+            jpg_count=jpg_count,
+            png_count=png_count,
+            svg_count=svg_count,
         )
 
         # 5. Outlink Analysis, Link Placement & Graph Extraction
@@ -349,11 +412,20 @@ class CompetitorSiteAdapter:
             if is_nofollow:
                 nofollow_count += 1
 
-            normalized_link = normalize_url(href, base_url=url)
+            if BARE_DOMAIN_PATTERN.match(href) and not href.startswith(("/", "#", "?", "./", "../")):
+                candidate_url = f"https://{href}"
+            else:
+                candidate_url = href
+
+            normalized_link = normalize_url(
+                candidate_url,
+                base_url=url,
+                preserve_trailing_slash=preserve_trailing_slash,
+            )
             if not normalized_link:
                 continue
 
-            if is_internal_url(normalized_link, base_domain):
+            if is_internal_url(normalized_link, base_domain, preserve_trailing_slash=preserve_trailing_slash):
                 internal_count += 1
                 placement = _classify_link_placement(a_tag)
                 placements[placement] += 1
@@ -374,42 +446,86 @@ class CompetitorSiteAdapter:
             else:
                 external_count += 1
 
-        # 6. Word count & SSR Validation
+        # 6. NAP & Maps extraction (inspect elements before DOM cleaning)
+        found_phones: set[str] = set()
+        found_tel_links: set[str] = set()
+        found_addresses: set[str] = set()
+        found_map_links: set[str] = set()
+        found_map_coords: set[str] = set()
+
+        for tel in tree.css("a[href^='tel:']"):
+            href = tel.attributes.get("href", "")
+            raw_tel = href.replace("tel:", "").split("?")[0].strip()
+            clean = re.sub(r"[^\d+]", "", raw_tel)
+            if clean:
+                found_tel_links.add(clean)
+                found_phones.add(clean)
+
+        for iframe in tree.css("iframe[src*='google.com/maps'], iframe[src*='maps.google.com']"):
+            src = iframe.attributes.get("src", "").strip()
+            if src:
+                found_map_links.add(src)
+                m_pb = re.search(r"!2d(-?\d+\.\d+)!3d(-?\d+\.\d+)", src)
+                if m_pb:
+                    found_map_coords.add(f"{m_pb.group(2)},{m_pb.group(1)}")
+                else:
+                    m_q = re.search(r"[?&](?:q|ll)=(-?\d+\.\d+),(-?\d+\.\d+)", src)
+                    if m_q:
+                        found_map_coords.add(f"{m_q.group(1)},{m_q.group(2)}")
+
+        for map_a in tree.css("a[href*='google.com/maps'], a[href*='maps.google.com'], a[href*='goo.gl/maps']"):
+            m_href = map_a.attributes.get("href", "").strip()
+            if m_href:
+                found_map_links.add(m_href)
+                m_q = re.search(r"[?&](?:q|ll)=(-?\d+\.\d+),(-?\d+\.\d+)", m_href)
+                if m_q:
+                    found_map_coords.add(f"{m_q.group(1)},{m_q.group(2)}")
+
+        for addr_tag in tree.css("address, .address, [class*='address'], [class*='location'], [itemprop='address']"):
+            txt = " ".join(addr_tag.text().split()).strip()
+            if txt and len(txt) < 250:
+                found_addresses.add(txt)
+
+        footer = tree.css_first("footer")
+        if footer:
+            for addr_tag in footer.css("address, .address, [class*='address'], [class*='location']"):
+                txt = " ".join(addr_tag.text().split()).strip()
+                if txt and len(txt) < 250:
+                    found_addresses.add(txt)
+
+        # 7. DOM cleaning: Remove non-visible tags before visible body text & token analysis
+        for non_vis in tree.css("script, style, noscript, template, svg"):
+            non_vis.decompose()
+
         body = tree.css_first("body")
-        text_content = body.text() if body else ""
-        words = [w for w in re.findall(r"\b\w+\b", text_content) if len(w) > 1]
+        visible_body_text = body.text(separator=" ") if body else ""
+
+        for phone_match in PHONE_PATTERN.finditer(visible_body_text):
+            matched = phone_match.group(0).strip()
+            digits = re.sub(r"\D", "", matched)
+            if len(digits) == 10:
+                found_phones.add(f"({digits[:3]}) {digits[3:6]}-{digits[6:]}")
+            elif len(digits) == 11 and digits.startswith("1"):
+                found_phones.add(f"({digits[1:4]}) {digits[4:7]}-{digits[7:]}")
+
+        for addr_match in ADDRESS_REGEX.finditer(visible_body_text):
+            found_addresses.add(" ".join(addr_match.group(0).split()).strip())
+
+        words = [w for w in re.findall(r"\b[A-Za-z0-9']+\b", visible_body_text) if len(w) > 1]
         word_count = len(words)
+        first_50_words = " ".join(words[:50])
+        body_tokens_sample = [w.lower() for w in words[:150] if len(w) > 2]
 
         is_ssr = True
         if raw_pre_js_html:
             raw_tree = HTMLParser(raw_pre_js_html)
+            for non_vis in raw_tree.css("script, style, noscript, template, svg"):
+                non_vis.decompose()
             raw_body = raw_tree.css_first("body")
-            raw_text = raw_body.text() if raw_body else ""
-            raw_words = len([w for w in re.findall(r"\b\w+\b", raw_text) if len(w) > 1])
+            raw_text = raw_body.text(separator=" ") if raw_body else ""
+            raw_words = len([w for w in re.findall(r"\b[A-Za-z0-9']+\b", raw_text) if len(w) > 1])
             if word_count > 100 and (raw_words / max(word_count, 1)) < 0.15:
                 is_ssr = False
-
-        # 7. NAP Detection
-        found_phones: set[str] = set()
-        found_addresses: set[str] = set()
-
-        for tel in tree.css("a[href^='tel:']"):
-            href = tel.attributes.get("href", "")
-            clean = re.sub(r"[^\d+]", "", href.replace("tel:", "").split("?")[0])
-            if clean:
-                found_phones.add(clean)
-
-        for phone_match in PHONE_PATTERN.finditer(html):
-            matched = phone_match.group(0).strip()
-            if len(re.sub(r"\D", "", matched)) >= 10:
-                found_phones.add(matched)
-
-        footer = tree.css_first("footer")
-        if footer:
-            for addr_tag in footer.css("address, .address"):
-                txt = " ".join(addr_tag.text().split()).strip()
-                if txt:
-                    found_addresses.add(txt)
 
         # 8. Analytics & Local Marketing Stack Detection
         analytics_info = _extract_analytics(html)
@@ -418,6 +534,17 @@ class CompetitorSiteAdapter:
             url=url,
             final_url=effective_final_url,
             status_code=http_status,
+            initial_status_code=initial_status_code,
+            redirect_chain=redirect_chain or [],
+            redirect_target_status=redirect_target_status,
+            content_type=content_type,
+            transport_error=transport_error,
+            fetch_method=fetch_method,
+            ttfb_ms=ttfb_ms,
+            server_header=server_header,
+            cache_status=cache_status,
+            x_robots_tag=x_robots_tag,
+            in_sitemap=in_sitemap,
             title=title,
             meta_description=meta_desc,
             canonical_url=canonical_url,
@@ -425,14 +552,19 @@ class CompetitorSiteAdapter:
             h2=h2_list,
             h3=h3_list,
             word_count=word_count,
+            first_50_words=first_50_words,
+            body_tokens_sample=body_tokens_sample,
             internal_outlinks_count=internal_count,
             external_outlinks_count=external_count,
-            internal_urls=discovered_internal[:50],
+            internal_urls=discovered_internal,
             schema_types=sorted(list(schema_types)),
             schema_jsonld=schema_jsonld,
             nap_found=FoundNAP(
                 phones=sorted(list(found_phones))[:10],
                 addresses=sorted(list(found_addresses))[:5],
+                tel_links=sorted(list(found_tel_links))[:10],
+                map_links=sorted(list(found_map_links))[:5],
+                map_embed_coords=sorted(list(found_map_coords))[:5],
             ),
             is_ssr=is_ssr,
             lang=lang,

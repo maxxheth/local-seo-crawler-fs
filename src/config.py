@@ -40,6 +40,8 @@ def load_config() -> dict[str, Any]:
     enable_competitor = _parse_bool(os.getenv("ENABLE_COMPETITOR"), default=True)
     use_sitemap = _parse_bool(os.getenv("USE_SITEMAP"), default=True)
     fast_http_first = _parse_bool(os.getenv("FAST_HTTP_FIRST"), default=True)
+    preserve_trailing_slash = _parse_bool(os.getenv("PRESERVE_TRAILING_SLASH"), default=True)
+    verify_all_links = _parse_bool(os.getenv("VERIFY_ALL_LINKS"), default=False)
 
     # Queue & storage settings (SQLite is primary persistence)
     redis_url = os.getenv("REDIS_URL", "").strip()
@@ -81,6 +83,8 @@ def load_config() -> dict[str, Any]:
         "enable_competitor": enable_competitor,
         "use_sitemap": use_sitemap,
         "fast_http_first": fast_http_first,
+        "preserve_trailing_slash": preserve_trailing_slash,
+        "verify_all_links": verify_all_links,
         "redis_url": redis_url,
         "sqlite_db_name": sqlite_db_name,
         "export_format": export_format,

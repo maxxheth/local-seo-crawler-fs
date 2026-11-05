@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 import time
 from typing import Any
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urljoin
 
 import httpx
 
@@ -18,7 +18,7 @@ from src.config import extract_proxy_port, load_config, load_proxies
 from src.flaresolverr import FlareSolverrClient
 from src.output import OutputManager
 from src.seo_auditor import SEOAuditConfig, audit_page
-from src.sitemap import SitemapDiscovery, normalize_url
+from src.sitemap import SitemapDiscovery, is_internal_url, normalize_url
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -167,6 +167,72 @@ def _detect_challenge(html: str) -> bool:
     )
 
 
+def _extract_cache_header(headers: httpx.Headers | dict[str, str]) -> str:
+    for k in (
+        "cf-cache-status",
+        "x-f2f-fastcgi-cache",
+        "x-fastcgi-cache",
+        "x-cache",
+        "x-cache-status",
+        "x-proxy-cache",
+        "x-varnish",
+        "cache-control",
+    ):
+        v = headers.get(k)
+        if v:
+            return f"{k}: {v}"
+    return ""
+
+
+def fetch_with_redirect_inspection(
+    client: httpx.Client,
+    url: str,
+    max_hops: int = 5,
+    timeout: float = 15.0,
+) -> tuple[httpx.Response | None, list[str], str, int, int | None, str | None, int]:
+    """Fetch URL with hop-by-hop redirect tracking and safe target SSL inspection.
+
+    Returns:
+        (last_response, redirect_chain, final_url, initial_status, redirect_target_status, transport_error, ttfb_ms)
+    """
+    curr = url
+    redirect_chain: list[str] = []
+    initial_status = 200
+    first_resp: httpx.Response | None = None
+    last_resp: httpx.Response | None = None
+    ttfb_ms = 0
+
+    for hop in range(max_hops):
+        t_hop = time.monotonic()
+        try:
+            r = client.get(curr, follow_redirects=False, timeout=timeout)
+        except Exception as e:
+            if hop == 0:
+                return None, [], curr, 0, None, str(e), 0
+            else:
+                return first_resp, redirect_chain, curr, initial_status, None, str(e), ttfb_ms
+
+        if hop == 0:
+            initial_status = r.status_code
+            first_resp = r
+            ttfb_ms = int((time.monotonic() - t_hop) * 1000)
+
+        last_resp = r
+
+        if r.status_code in (301, 302, 303, 307, 308):
+            loc = r.headers.get("Location") or r.headers.get("location")
+            if not loc:
+                break
+            target_url = urljoin(curr, loc)
+            redirect_chain.append(f"{r.status_code} -> {loc}")
+            curr = target_url
+        else:
+            break
+
+    target_status = last_resp.status_code if (last_resp and redirect_chain) else None
+    return (last_resp, redirect_chain, curr, initial_status, target_status, None, ttfb_ms)
+
+
 def execute_single_scrape(
     job: dict[str, Any],
     shared_client: httpx.Client | None = None,
@@ -186,6 +252,16 @@ def execute_single_scrape(
     html = ""
     final_url = url
     status_code = 0
+    initial_status_code = 0
+    redirect_chain: list[str] = []
+    redirect_target_status: int | None = None
+    content_type = ""
+    server_header = ""
+    cache_status = ""
+    x_robots_tag = ""
+    ttfb_ms = 0
+    transport_error: str | None = None
+    fetch_method = "fast_http"
     error_msg: str | None = None
     solved_cookies: list[dict[str, Any]] = []
     solved_user_agent: str | None = None
@@ -198,7 +274,6 @@ def execute_single_scrape(
         try:
             client_kwargs: dict[str, Any] = {
                 "timeout": 15.0,
-                "follow_redirects": True,
                 "headers": dict(DEFAULT_HEADERS),
             }
             if cookie_jar:
@@ -210,16 +285,39 @@ def execute_single_scrape(
                 if cookie_jar:
                     for ck, cv in cookie_jar.items():
                         shared_client.cookies.set(ck, cv)
-                r = shared_client.get(url, timeout=15.0)
+                r, chain, dest_url, init_s, target_s, trans_err, hop_ttfb = fetch_with_redirect_inspection(
+                    shared_client, url, timeout=15.0
+                )
             else:
                 with httpx.Client(**client_kwargs) as h_client:
-                    r = h_client.get(url)
+                    r, chain, dest_url, init_s, target_s, trans_err, hop_ttfb = fetch_with_redirect_inspection(
+                        h_client, url, timeout=15.0
+                    )
 
-            status_code = r.status_code
-            html = r.text
-            final_url = str(r.url)
+            ttfb_ms = hop_ttfb
+            redirect_chain = chain
+            initial_status_code = init_s
+            redirect_target_status = target_s
+            transport_error = trans_err
+            final_url = dest_url
 
-            if status_code in (403, 429, 503) or _detect_challenge(html):
+            if r is not None:
+                headers = r.headers
+                server_header = headers.get("server", "")
+                cache_status = _extract_cache_header(headers)
+                content_type = headers.get("content-type", "")
+                x_robots_tag = headers.get("x-robots-tag", "")
+
+                if initial_status_code in (301, 302, 303, 307, 308):
+                    status_code = initial_status_code
+                    html = ""
+                else:
+                    status_code = r.status_code
+                    html = r.text
+            else:
+                status_code = initial_status_code
+
+            if status_code in (403, 429, 503) or (html and _detect_challenge(html)):
                 logger.debug("Fast HTTP encountered challenge (HTTP %d) on %s; escalating", status_code, url)
                 html = ""
                 status_code = 0
@@ -227,8 +325,8 @@ def execute_single_scrape(
             logger.debug("Fast HTTP error on %s: %s; escalating to FlareSolverr", url, fast_exc)
             html = ""
 
-    # Step 2: Escalate to FlareSolverr if HTML is still empty
-    if not html:
+    # Step 2: Escalate to FlareSolverr ONLY if HTML is empty AND status was not a definitive status code (e.g. not 200, 301, 302, 303, 307, 308, 404, 410)
+    if not html and status_code not in (200, 301, 302, 303, 307, 308, 404, 410):
         client = FlareSolverrClient(base_url=flaresolverr_url, max_timeout=max_timeout)
         try:
             fs_resp = client.request(
@@ -246,6 +344,7 @@ def execute_single_scrape(
                 status_code = fs_resp.status or 200
                 solved_cookies = fs_resp.cookies
                 solved_user_agent = fs_resp.user_agent
+                fetch_method = "flaresolverr"
         except Exception as exc:
             logger.warning("FlareSolverr request to %s failed: %s", url, exc)
             error_msg = str(exc)
@@ -283,17 +382,42 @@ def execute_single_scrape(
         }
 
     elif mode == "competitor":
+        is_challenge = _detect_challenge(html) if html else False
+        is_html = (not content_type) or any(ht in content_type.lower() for ht in ("text/html", "application/xhtml+xml"))
+
+        # If it's a redirect or non-HTML content, do not parse HTML body
+        effective_html = html if (status_code == 200 and is_html and initial_status_code not in (301, 302, 303, 307, 308)) else ""
+
         comp_adapter = CompetitorSiteAdapter()
         page_rec, ev_list, discovered_links, link_edges = comp_adapter.parse(
             url=url,
-            html=html,
+            html=effective_html,
             http_status=status_code,
             final_url=final_url,
             response_time_ms=elapsed_ms,
             page_size_bytes=page_size_bytes,
+            initial_status_code=initial_status_code or status_code,
+            redirect_chain=redirect_chain,
+            redirect_target_status=redirect_target_status,
+            content_type=content_type,
+            transport_error=transport_error or "",
+            fetch_method=fetch_method,
+            ttfb_ms=ttfb_ms,
+            server_header=server_header,
+            cache_status=cache_status,
+            x_robots_tag=x_robots_tag,
+            in_sitemap=job.get("in_sitemap", False),
+            preserve_trailing_slash=job.get("preserve_trailing_slash", True),
         )
-        is_challenge = _detect_challenge(html)
-        is_success = (status_code == 200) and bool(html) and not is_challenge
+
+        # If redirect occurred, queue the final destination URL if internal
+        if initial_status_code in (301, 302, 303, 307, 308) and final_url:
+            if is_internal_url(final_url, job.get("domain", "")):
+                if final_url not in discovered_links:
+                    discovered_links.append(final_url)
+
+        # Definitive status codes: 200, 301, 302, 303, 307, 308, 404, 410 (never retried!)
+        is_success = (status_code in (200, 301, 302, 303, 307, 308, 404, 410)) and not is_challenge
 
         # Run per-page SEO issues check
         cfg = audit_cfg or SEOAuditConfig()

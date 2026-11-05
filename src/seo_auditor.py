@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 from src.models import PageTechnicalRecord, SEOIssue, SiteAuditSummary
-from src.sitemap import normalize_url
+from src.sitemap import canonical_url_key, normalize_url
 
 _TOKEN_SPLIT = re.compile(r"\W+")
 DUPLICATION_TIME_BUDGET_SECONDS = 10.0
@@ -32,24 +32,74 @@ class SEOAuditConfig:
     large_err_bytes: int = 3145728   # 3 MB
 
 
-def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig) -> list[SEOIssue]:
+def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig | None = None) -> list[SEOIssue]:
     """Execute per-page SEO defect checks against configured thresholds."""
+    if cfg is None:
+        cfg = SEOAuditConfig()
     issues: list[SEOIssue] = []
     url = record.url
+    status = record.status_code
 
     # 1. HTTP Status & Technical Transport
-    status = record.status_code
-    if status >= 500:
+    if record.transport_error:
         issues.append(
             SEOIssue(
                 url=url,
                 severity="error",
                 category="Technical",
-                issue=f"HTTP {status} Server Error",
-                details=f"Page returned server error status code {status}",
+                issue="Transport Error",
+                details=record.transport_error,
             )
         )
-    elif status >= 400:
+        if status != 200:
+            return issues
+
+    if status in (301, 302, 303, 307, 308) or (record.initial_status_code in (301, 302, 303, 307, 308)):
+        chain_str = " -> ".join(record.redirect_chain) if record.redirect_chain else f"HTTP {status}"
+        if record.redirect_target_status == 404:
+            issues.append(
+                SEOIssue(
+                    url=url,
+                    severity="error",
+                    category="Technical",
+                    issue="Redirect Target Returns 404",
+                    details=f"Redirect {chain_str} leads to broken 404 target: {record.final_url}",
+                )
+            )
+        elif record.transport_error:
+            issues.append(
+                SEOIssue(
+                    url=url,
+                    severity="error",
+                    category="Technical",
+                    issue="Redirect Target Transport Error",
+                    details=f"Redirect {chain_str} target failed connection/SSL: {record.transport_error}",
+                )
+            )
+        else:
+            issues.append(
+                SEOIssue(
+                    url=url,
+                    severity="info",
+                    category="Technical",
+                    issue=f"HTTP {status} Redirect",
+                    details=f"Page redirected to {record.final_url or 'another location'} ({chain_str})",
+                )
+            )
+        return issues
+
+    if status == 404:
+        issues.append(
+            SEOIssue(
+                url=url,
+                severity="error",
+                category="Technical",
+                issue="Broken Page (HTTP 404)",
+                details="Page returned 404 Not Found",
+            )
+        )
+        return issues
+    elif status >= 400 and status < 500:
         issues.append(
             SEOIssue(
                 url=url,
@@ -59,16 +109,43 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig) -> list[SEOIssu
                 details=f"Page returned client error status code {status}",
             )
         )
-    elif status >= 300:
+        return issues
+
+    if status >= 500:
         issues.append(
             SEOIssue(
                 url=url,
-                severity="info",
+                severity="critical",
                 category="Technical",
-                issue=f"HTTP {status} Redirect",
-                details=f"Page redirected to {record.final_url or 'another location'}",
+                issue=f"HTTP {status} Server Error",
+                details=f"Page returned server error status code {status}",
             )
         )
+        return issues
+
+    if status != 200:
+        issues.append(
+            SEOIssue(
+                url=url,
+                severity="error",
+                category="Technical",
+                issue=f"HTTP {status} Unexpected Status",
+                details=f"Page returned status {status}",
+            )
+        )
+        return issues
+
+    if record.content_type and not any(ht in record.content_type.lower() for ht in ("text/html", "application/xhtml+xml")):
+        issues.append(
+            SEOIssue(
+                url=url,
+                severity="warning",
+                category="Technical",
+                issue="Non-HTML Asset Response",
+                details=f"Page returned content type '{record.content_type}' instead of HTML",
+            )
+        )
+        return issues
 
     # 2. Title Checks
     title = (record.title or "").strip()
@@ -174,17 +251,30 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig) -> list[SEOIssu
 
     # 6. Indexability & Directives
     robots = (record.meta_robots or "").lower()
-    if "noindex" in robots:
+    x_robots = (record.x_robots_tag or "").lower()
+    is_noindex = "noindex" in robots or "noindex" in x_robots
+    if is_noindex:
         issues.append(
             SEOIssue(
                 url=url,
                 severity="error",
                 category="Indexability",
                 issue="Noindex Tag Present",
-                details="Page has meta robots 'noindex' directive blocking search engines",
+                details="Page has meta robots or X-Robots-Tag 'noindex' directive blocking search engines",
             )
         )
-    if "nofollow" in robots:
+        if record.in_sitemap:
+            issues.append(
+                SEOIssue(
+                    url=url,
+                    severity="error",
+                    category="Indexability",
+                    issue="Noindex Page in Sitemap",
+                    details="Page has a noindex directive but is submitted in the XML sitemap",
+                )
+            )
+
+    if "nofollow" in robots or "nofollow" in x_robots:
         issues.append(
             SEOIssue(
                 url=url,
@@ -194,6 +284,29 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig) -> list[SEOIssu
                 details="Page has meta robots 'nofollow' directive preventing link graph crawl",
             )
         )
+
+    # Conversion & Staging Page Indexability Checks
+    if not is_noindex:
+        if any(pat in url.lower() for pat in ("thank-you", "thankyou", "confirmation", "form-received", "quote-received")):
+            issues.append(
+                SEOIssue(
+                    url=url,
+                    severity="warning",
+                    category="Indexability",
+                    issue="Indexable Thank-You / Confirmation Page",
+                    details="Conversion confirmation page is indexable by search engines; recommend adding 'noindex' directive",
+                )
+            )
+        if any(pat in url.lower() for pat in ("prototype", "staging", "test-page", "temp-", "draft-")):
+            issues.append(
+                SEOIssue(
+                    url=url,
+                    severity="warning",
+                    category="Indexability",
+                    issue="Indexable Prototype / Staging Page",
+                    details="Staging or prototype page is indexable; recommend adding 'noindex' or restricting access",
+                )
+            )
 
     # Canonical URL
     canon = (record.canonical_url or "").strip()
@@ -211,7 +324,7 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig) -> list[SEOIssu
     else:
         norm_canon = normalize_url(canon, base_url=effective_url) or canon.rstrip("/")
         norm_page = normalize_url(effective_url) or effective_url.rstrip("/")
-        if norm_canon != norm_page:
+        if canonical_url_key(norm_canon) != canonical_url_key(norm_page):
             issues.append(
                 SEOIssue(
                     url=url,
@@ -303,6 +416,28 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig) -> list[SEOIssu
             )
         )
 
+    # Location / Facility specific LocalBusiness schema check
+    is_location_page = (
+        bool(record.nap_found.addresses)
+        or bool(record.nap_found.map_embed_coords)
+        or any(pat in url.lower() for pat in ("/locations/", "/austin", "/san-antonio", "/dallas", "/houston", "-tx", "/ranch", "/creek", "/spa"))
+    )
+    if is_location_page and not is_noindex:
+        has_local_schema = any(
+            t in record.schema_types
+            for t in ("LocalBusiness", "MedicalBusiness", "HealthAndBeautyBusiness", "DaySpa", "BeautySalon", "MedicalClinic", "Physician")
+        )
+        if not has_local_schema:
+            issues.append(
+                SEOIssue(
+                    url=url,
+                    severity="warning",
+                    category="Structured Data",
+                    issue="Missing LocalBusiness / Clinic Schema",
+                    details="Location or facility page lacks LocalBusiness or DaySpa Schema.org structured data",
+                )
+            )
+
     # 10. Performance (Response Time & Size)
     resp_time = record.response_time_ms
     if resp_time > cfg.slow_err_ms:
@@ -388,47 +523,91 @@ def _length_similarity(count_a: int, count_b: int) -> float:
 
 
 def _duplication_similarity(a: dict[str, Any], b: dict[str, Any], threshold: float) -> float | None:
-    weights = _DUP_WEIGHTS
+    has_desc = bool(a.get("desc_tokens") and b.get("desc_tokens"))
+    has_body = bool(a.get("body_tokens") and b.get("body_tokens"))
+
+    base_weights: dict[str, float] = {
+        "title": 0.40,
+        "h1": 0.25,
+        "word_count": 0.10,
+    }
+    if has_desc:
+        base_weights["desc"] = 0.25
+    if has_body:
+        base_weights["body"] = 0.20
+
+    total_w = sum(base_weights.values())
+    weights = {k: v / total_w for k, v in base_weights.items()}
+
     score = _dice(a["title_tokens"], b["title_tokens"]) * weights["title"]
-    if score + weights["desc"] + weights["h1"] + weights["word_count"] < threshold:
+    if score + (1.0 - weights["title"]) < threshold:
         return None
-    score += _dice(a["desc_tokens"], b["desc_tokens"]) * weights["desc"]
-    if score + weights["h1"] + weights["word_count"] < threshold:
-        return None
+
+    if has_desc:
+        score += _dice(a["desc_tokens"], b["desc_tokens"]) * weights["desc"]
+
     score += _dice(a["h1_tokens"], b["h1_tokens"]) * weights["h1"]
-    if score + weights["word_count"] < threshold:
-        return None
+
+    if has_body:
+        score += _dice(a["body_tokens"], b["body_tokens"]) * weights["body"]
+
     score += _length_similarity(a["word_count"], b["word_count"]) * weights["word_count"]
     return score if score >= threshold else None
 
 
 def detect_duplicate_pages(
-    pages: list[PageTechnicalRecord],
+    pages: list[PageTechnicalRecord] | list[dict[str, Any]],
     threshold: float = 0.85,
     time_budget: float = DUPLICATION_TIME_BUDGET_SECONDS,
 ) -> dict[str, SEOIssue]:
     """Detect near-duplicate or doorway pages across crawled records using Dice token similarity.
 
+    Accepts both PageTechnicalRecord instances and raw page dicts from storage.
     Returns mapping of url -> SEOIssue.
     """
     candidates = []
     for p in pages:
-        if p.status_code != 200:
+        status_code = p.get("status_code", 0) if isinstance(p, dict) else getattr(p, "status_code", 0)
+        if status_code != 200:
             continue
-        title = _normalise_text(p.title)
-        desc = _normalise_text(p.meta_description)
-        h1 = _normalise_text(p.h1)
-        if not title and not desc:
+        redirect_chain = p.get("redirect_chain", []) if isinstance(p, dict) else getattr(p, "redirect_chain", [])
+        initial_status = p.get("initial_status_code", 0) if isinstance(p, dict) else getattr(p, "initial_status_code", 0)
+        if redirect_chain or (initial_status in (301, 302, 303, 307, 308)):
+            continue
+        meta_robots = p.get("meta_robots", "") if isinstance(p, dict) else getattr(p, "meta_robots", "")
+        x_robots_tag = p.get("x_robots_tag", "") if isinstance(p, dict) else getattr(p, "x_robots_tag", "")
+        robots = (meta_robots or "").lower()
+        x_robots = (x_robots_tag or "").lower()
+        if "noindex" in robots or "noindex" in x_robots:
+            continue
+        url = p.get("url", "") if isinstance(p, dict) else getattr(p, "url", "")
+        if any(pat in url.lower() for pat in ("/thank-you", "/thankyou", "/confirmation")):
+            continue
+
+        raw_title = p.get("title", "") if isinstance(p, dict) else getattr(p, "title", "")
+        raw_desc = p.get("meta_description", "") if isinstance(p, dict) else getattr(p, "meta_description", "")
+        raw_h1 = p.get("h1", []) if isinstance(p, dict) else getattr(p, "h1", [])
+        raw_body_tokens = p.get("body_tokens_sample", []) if isinstance(p, dict) else getattr(p, "body_tokens_sample", [])
+        raw_first_50 = p.get("first_50_words", "") if isinstance(p, dict) else getattr(p, "first_50_words", "")
+        word_count = p.get("word_count", 0) if isinstance(p, dict) else getattr(p, "word_count", 0)
+
+        title = _normalise_text(raw_title)
+        desc = _normalise_text(raw_desc)
+        h1 = _normalise_text(raw_h1)
+        body = _normalise_text(raw_body_tokens or raw_first_50)
+        if not title and not desc and not h1:
             continue
         candidates.append({
-            "url": p.url,
+            "url": url,
             "title": title,
             "desc": desc,
             "h1": h1,
+            "body": body,
             "title_tokens": _tokens(title),
             "desc_tokens": _tokens(desc),
             "h1_tokens": _tokens(h1),
-            "word_count": p.word_count,
+            "body_tokens": _tokens(body),
+            "word_count": word_count,
         })
 
     if len(candidates) < 2:
@@ -587,6 +766,19 @@ def generate_site_summary(pages: list[PageTechnicalRecord]) -> SiteAuditSummary:
             if iss.category == "Duplication":
                 duplicate_pages += 1
 
+    resp_times = sorted([p.response_time_ms for p in pages if p.response_time_ms > 0])
+    if resp_times:
+        import statistics
+        median_resp = round(float(statistics.median(resp_times)), 1)
+        p95_idx = int(math.ceil(0.95 * len(resp_times))) - 1
+        p95_resp = round(float(resp_times[max(0, min(p95_idx, len(resp_times) - 1))]), 1)
+    else:
+        median_resp = 0.0
+        p95_resp = 0.0
+
+    servers = {p.server_header for p in pages if p.server_header}
+    caching = {p.cache_status for p in pages if p.cache_status}
+
     return SiteAuditSummary(
         total_pages=total_pages,
         total_issues=errors_count + warnings_count + info_count,
@@ -597,6 +789,10 @@ def generate_site_summary(pages: list[PageTechnicalRecord]) -> SiteAuditSummary:
         broken_internal_links_count=len(broken_links_set),
         orphan_pages_count=orphans,
         avg_response_time_ms=round(total_resp_time / max(1, total_pages), 1),
+        median_response_time_ms=median_resp,
+        p95_response_time_ms=p95_resp,
+        server_stack_detected=sorted(list(servers)),
+        caching_detected=sorted(list(caching)),
         cms_generators_detected=sorted(list(generators)),
         analytics_detected=sorted(list(analytics_found)),
         issues_by_category=dict(sorted(issues_by_cat.items(), key=lambda x: -x[1])),

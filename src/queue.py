@@ -44,6 +44,16 @@ class FrontierQueue(ABC):
         """Clear queue state."""
         ...
 
+    @abstractmethod
+    def mark_done(self, urls: list[str]) -> None:
+        """Mark URLs as completed and remove from pending/in-flight jobs."""
+        ...
+
+    @abstractmethod
+    def reconcile(self, completed_urls: set[str] | None = None) -> None:
+        """Reset any abandoned in-flight jobs back to pending and remove uncompleted seen URLs."""
+        ...
+
 
 class SQLiteFrontierQueue(FrontierQueue):
     """Thread-safe SQLite-backed frontier queue with atomic chunk popping and seen URL tracking."""
@@ -132,14 +142,47 @@ class SQLiteFrontierQueue(FrontierQueue):
             ids = [r["id"] for r in rows]
             placeholders = ",".join("?" for _ in ids)
             conn.execute(
-                f"DELETE FROM {self.queue_name}_jobs WHERE id IN ({placeholders})",
+                f"UPDATE {self.queue_name}_jobs SET status = 'in_flight' WHERE id IN ({placeholders})",
                 ids,
             )
 
             return [json.loads(r["data"]) for r in rows]
 
+    def mark_done(self, urls: list[str]) -> None:
+        if not urls:
+            return
+        with self._get_conn() as conn:
+            for i in range(0, len(urls), 500):
+                batch = urls[i : i + 500]
+                placeholders = ",".join("?" for _ in batch)
+                conn.execute(
+                    f"DELETE FROM {self.queue_name}_jobs WHERE url IN ({placeholders})",
+                    batch,
+                )
+
+    def reconcile(self, completed_urls: set[str] | None = None) -> None:
+        """Reset any abandoned in_flight jobs back to pending, and remove uncompleted seen URLs."""
+        with self._get_conn() as conn:
+            conn.execute(
+                f"UPDATE {self.queue_name}_jobs SET status = 'pending' WHERE status = 'in_flight'"
+            )
+            if completed_urls is not None:
+                job_urls = {r["url"] for r in conn.execute(f"SELECT url FROM {self.queue_name}_jobs").fetchall()}
+                seen_urls = {r["url"] for r in conn.execute(f"SELECT url FROM {self.queue_name}_seen").fetchall()}
+                orphaned_seen = seen_urls - completed_urls - job_urls
+                if orphaned_seen:
+                    orphaned_list = list(orphaned_seen)
+                    for i in range(0, len(orphaned_list), 500):
+                        batch = orphaned_list[i : i + 500]
+                        ph = ",".join("?" for _ in batch)
+                        conn.execute(f"DELETE FROM {self.queue_name}_seen WHERE url IN ({ph})", batch)
+
     def has_pending(self) -> bool:
-        return self.size() > 0
+        with self._get_conn() as conn:
+            row = conn.execute(
+                f"SELECT 1 FROM {self.queue_name}_jobs WHERE status = 'pending' LIMIT 1"
+            ).fetchone()
+            return row is not None
 
     def size(self) -> int:
         with self._get_conn() as conn:
@@ -216,6 +259,12 @@ class RedisFrontierQueue(FrontierQueue):
 
     def clear(self) -> None:
         self.client.delete(self.queue_key, self.seen_key)
+
+    def mark_done(self, urls: list[str]) -> None:
+        pass
+
+    def reconcile(self, completed_urls: set[str] | None = None) -> None:
+        pass
 
 
 def create_frontier_queue(

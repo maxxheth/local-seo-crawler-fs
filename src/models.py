@@ -45,6 +45,9 @@ class CitationsManifest(BaseModel):
 class FoundNAP(BaseModel):
     phones: list[str] = Field(default_factory=list)
     addresses: list[str] = Field(default_factory=list)
+    tel_links: list[str] = Field(default_factory=list)
+    map_links: list[str] = Field(default_factory=list)
+    map_embed_coords: list[str] = Field(default_factory=list)
 
 
 class ImageAuditSummary(BaseModel):
@@ -53,6 +56,11 @@ class ImageAuditSummary(BaseModel):
     decorative_alt_count: int = 0
     missing_dimensions_count: int = 0
     missing_alt_sample_urls: list[str] = Field(default_factory=list)
+    webp_count: int = 0
+    avif_count: int = 0
+    jpg_count: int = 0
+    png_count: int = 0
+    svg_count: int = 0
 
 
 class AnalyticsAndTracking(BaseModel):
@@ -95,6 +103,17 @@ class PageTechnicalRecord(BaseModel):
     url: str
     final_url: str = ""
     status_code: int = 200
+    initial_status_code: int = 200
+    redirect_chain: list[str] = Field(default_factory=list)
+    redirect_target_status: int | None = None
+    content_type: str = ""
+    transport_error: str = ""
+    fetch_method: str = "fast_http"
+    ttfb_ms: int = 0
+    server_header: str = ""
+    cache_status: str = ""
+    x_robots_tag: str = ""
+    in_sitemap: bool = False
     title: str = ""
     meta_description: str = ""
     canonical_url: str = ""
@@ -102,6 +121,8 @@ class PageTechnicalRecord(BaseModel):
     h2: list[str] = Field(default_factory=list)
     h3: list[str] = Field(default_factory=list)
     word_count: int = 0
+    first_50_words: str = ""
+    body_tokens_sample: list[str] = Field(default_factory=list)
     internal_outlinks_count: int = 0
     external_outlinks_count: int = 0
     internal_urls: list[str] = Field(default_factory=list)
@@ -146,8 +167,12 @@ class SiteAuditSummary(BaseModel):
     broken_internal_links_count: int = 0
     orphan_pages_count: int = 0
     avg_response_time_ms: float = 0.0
+    median_response_time_ms: float = 0.0
+    p95_response_time_ms: float = 0.0
     cms_generators_detected: list[str] = Field(default_factory=list)
     analytics_detected: list[str] = Field(default_factory=list)
+    server_stack_detected: list[str] = Field(default_factory=list)
+    caching_detected: list[str] = Field(default_factory=list)
     issues_by_category: dict[str, int] = Field(default_factory=dict)
 
 
