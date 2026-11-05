@@ -208,28 +208,66 @@ class SQLiteStorage:
                 rows,
             )
 
-    def post_crawl_sync(self, duplicate_issues: dict[str, SEOIssue] | None = None) -> None:
-        """Run post-crawl link status backfill, compute inlinks, and update pages with broken links."""
+    def backfill_link_statuses_from_pages(self) -> None:
+        """Backfill target_status on internal_links from crawled pages (exact or trailing-slash matched)."""
         with self._get_connection() as conn:
-            # 1. Backfill target_status on internal_links from pages table (exact or trailing-slash matched)
             conn.execute("""
             UPDATE internal_links
-            SET target_status = (
-                SELECT p.status_code FROM pages p
-                WHERE p.url = internal_links.target_url
-                   OR rtrim(p.url, '/') = rtrim(internal_links.target_url, '/')
-                LIMIT 1
+            SET target_status = COALESCE(
+                (SELECT p.status_code FROM pages p WHERE p.url = internal_links.target_url LIMIT 1),
+                (SELECT p.status_code FROM pages p WHERE rtrim(p.url, '/') = rtrim(internal_links.target_url, '/') LIMIT 1)
             )
             WHERE target_status IS NULL
             """)
 
-            # 2. Compute inlinks_count per page
+    def post_crawl_sync(self, duplicate_issues: dict[str, SEOIssue] | None = None) -> None:
+        """Run post-crawl link status backfill, compute inlinks, and update pages with broken links."""
+        self.backfill_link_statuses_from_pages()
+
+        with self._get_connection() as conn:
+            # 1b. If a link points to a 3xx redirect page whose final destination returned >= 400, mark link as broken
+            page_rows = conn.execute("SELECT url, raw_json FROM pages").fetchall()
+            redirect_broken_targets: dict[str, int] = {}
+            redirect_final_map: dict[str, str] = {}
+            for pr in page_rows:
+                u = pr["url"]
+                p_data = json.loads(pr["raw_json"])
+                st = int(p_data.get("status_code", 0))
+                r_target_st = p_data.get("redirect_target_status")
+                f_url = p_data.get("final_url") or ""
+                if st in (301, 302, 303, 307, 308):
+                    if f_url and f_url != u:
+                        redirect_final_map[u.rstrip("/")] = f_url.rstrip("/")
+                    if isinstance(r_target_st, int) and r_target_st >= 400:
+                        redirect_broken_targets[u] = r_target_st
+                        redirect_broken_targets[u.rstrip("/")] = r_target_st
+
+            if redirect_broken_targets:
+                for r_url, r_st in redirect_broken_targets.items():
+                    conn.execute(
+                        "UPDATE internal_links SET target_status = ? WHERE target_url = ? OR rtrim(target_url, '/') = ?",
+                        (r_st, r_url, r_url.rstrip("/")),
+                    )
+
+            # 2. Compute inlinks_count per page (matching both exact URL and trailing-slash normalized URL, plus redirect resolution)
             inlink_rows = conn.execute("""
             SELECT target_url, COUNT(*) as cnt
             FROM internal_links
             GROUP BY target_url
             """).fetchall()
-            inlinks_map = {r["target_url"]: r["cnt"] for r in inlink_rows}
+            inlinks_exact: dict[str, int] = {}
+            inlinks_rtrim: dict[str, int] = {}
+            for r in inlink_rows:
+                t_url = r["target_url"] or ""
+                cnt = int(r["cnt"])
+                inlinks_exact[t_url] = inlinks_exact.get(t_url, 0) + cnt
+                norm_key = t_url.rstrip("/")
+                inlinks_rtrim[norm_key] = inlinks_rtrim.get(norm_key, 0) + cnt
+                # Credit final destination of a redirect with inlinks pointing to the redirecting URL
+                if norm_key in redirect_final_map:
+                    dest_key = redirect_final_map[norm_key]
+                    if dest_key != norm_key:
+                        inlinks_rtrim[dest_key] = inlinks_rtrim.get(dest_key, 0) + cnt
 
             # 3. Find broken outlinks (target_status >= 400), deduplicated per (source_url, target_url)
             broken_rows = conn.execute("""
@@ -247,14 +285,14 @@ class SQLiteStorage:
             )
 
             # 4. Update raw_json and inlinks_count for all pages
-            page_rows = conn.execute("SELECT url, raw_json FROM pages").fetchall()
             updated_pages = []
-            new_broken_issues = []
+            new_post_crawl_issues: list[tuple[str, str, str, str, str]] = []
 
             for pr in page_rows:
                 u = pr["url"]
                 data = json.loads(pr["raw_json"])
-                data["inlinks_count"] = inlinks_map.get(u, 0)
+                inlinks_val = max(inlinks_exact.get(u, 0), inlinks_rtrim.get(u.rstrip("/"), 0))
+                data["inlinks_count"] = inlinks_val
                 b_links = broken_map.get(u, [])
                 data["broken_outlinks"] = b_links
 
@@ -275,12 +313,25 @@ class SQLiteStorage:
                         "details": f"Page links to broken internal URL: {bl}",
                     }
                     existing_issues.append(iss)
-                    new_broken_issues.append(iss)
+                    new_post_crawl_issues.append((
+                        iss["url"],
+                        iss["severity"],
+                        iss["category"],
+                        iss["issue"],
+                        iss["details"],
+                    ))
 
                 # Add duplicate content issues if flagged
                 if duplicate_issues and u in duplicate_issues:
                     dup_iss = duplicate_issues[u].model_dump()
                     existing_issues.append(dup_iss)
+                    new_post_crawl_issues.append((
+                        dup_iss["url"],
+                        dup_iss["severity"],
+                        dup_iss["category"],
+                        dup_iss["issue"],
+                        dup_iss["details"],
+                    ))
 
                 data["issues"] = existing_issues
                 updated_pages.append((data["inlinks_count"], json.dumps(data, ensure_ascii=False), u))
@@ -290,10 +341,14 @@ class SQLiteStorage:
                 updated_pages,
             )
 
-        if new_broken_issues:
-            self.save_seo_issues_batch(new_broken_issues)
-        if duplicate_issues:
-            self.save_seo_issues_batch(list(duplicate_issues.values()))
+            if new_post_crawl_issues:
+                conn.executemany(
+                    """
+                    INSERT INTO seo_issues (url, severity, category, issue, details)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    new_post_crawl_issues,
+                )
 
     def save_citation(self, citation_data: dict[str, Any]) -> None:
         with self._get_connection() as conn:
@@ -382,7 +437,8 @@ class SQLiteStorage:
             ]
 
     def get_unvisited_link_targets(self) -> list[str]:
-        """Fetch distinct target URLs in internal_links where target_status is still NULL."""
+        """Fetch distinct target URLs in internal_links where target_status is still NULL after backfilling known pages."""
+        self.backfill_link_statuses_from_pages()
         with self._get_connection() as conn:
             rows = conn.execute(
                 "SELECT DISTINCT target_url FROM internal_links WHERE target_status IS NULL"

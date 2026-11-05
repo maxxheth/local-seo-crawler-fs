@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 import time
 from typing import Any
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import quote_plus, urljoin, urlparse
 
 import httpx
 
@@ -79,6 +79,7 @@ def load_targets(
     business_name: str = "",
     use_sitemap: bool = True,
     max_pages: int = 1000,
+    preserve_trailing_slash: bool = True,
 ) -> list[dict[str, Any]]:
     """Load initial targets from input file, sitemap, or CLI parameters."""
     targets: list[dict[str, Any]] = []
@@ -96,7 +97,7 @@ def load_targets(
             citations_list = data.get("citations", [])
             for c in citations_list:
                 c_url = c.get("url", "")
-                norm_c = normalize_url(c_url) or c_url
+                norm_c = normalize_url(c_url, preserve_trailing_slash=preserve_trailing_slash) or c_url
                 targets.append({
                     "url": norm_c,
                     "platform": c.get("platform", ""),
@@ -104,6 +105,7 @@ def load_targets(
                     "business_name": b_name,
                     "expected_address": c.get("expected_address") or default_address,
                     "expected_phone": c.get("expected_phone") or default_phone,
+                    "preserve_trailing_slash": preserve_trailing_slash,
                 })
         else:
             logger.warning("No input citations file found at %s", input_path)
@@ -111,19 +113,24 @@ def load_targets(
     elif mode == "competitor":
         clean_domain = domain.replace("https://", "").replace("http://", "").strip("/")
         root_url = f"https://{clean_domain}/"
-        norm_root = normalize_url(root_url) or root_url
+        norm_root = normalize_url(root_url, preserve_trailing_slash=preserve_trailing_slash) or root_url
 
         # Sitemap seeding
         sitemap_urls: list[str] = []
         if use_sitemap:
             try:
                 logger.info("Discovering sitemap URLs for %s...", clean_domain)
-                seeder = SitemapDiscovery(clean_domain, max_urls=max_pages)
+                seeder = SitemapDiscovery(
+                    clean_domain,
+                    max_urls=max_pages,
+                    preserve_trailing_slash=preserve_trailing_slash,
+                )
                 sitemap_urls = seeder.discover_urls()
                 logger.info("Sitemap discovery found %d initial URLs", len(sitemap_urls))
             except Exception as sm_exc:
                 logger.warning("Sitemap discovery failed or timed out: %s", sm_exc)
 
+        discovered_sitemap_set = set(sitemap_urls)
         if not sitemap_urls:
             sitemap_urls = [norm_root]
         elif norm_root not in sitemap_urls:
@@ -135,6 +142,8 @@ def load_targets(
                 "domain": clean_domain,
                 "target_type": "homepage" if u == norm_root else "sitemap_page",
                 "depth": 0,
+                "in_sitemap": u in discovered_sitemap_set,
+                "preserve_trailing_slash": preserve_trailing_slash,
             })
 
     elif mode == "serp":
@@ -412,9 +421,12 @@ def execute_single_scrape(
 
         # If redirect occurred, queue the final destination URL if internal
         if initial_status_code in (301, 302, 303, 307, 308) and final_url:
-            if is_internal_url(final_url, job.get("domain", "")):
-                if final_url not in discovered_links:
-                    discovered_links.append(final_url)
+            target_domain = job.get("domain") or urlparse(url).netloc.lower()
+            preserve_ts = job.get("preserve_trailing_slash", True)
+            norm_final = normalize_url(final_url, preserve_trailing_slash=preserve_ts) or final_url
+            if is_internal_url(norm_final, target_domain, preserve_trailing_slash=preserve_ts):
+                if norm_final not in discovered_links:
+                    discovered_links.append(norm_final)
 
         # Definitive status codes: 200, 301, 302, 303, 307, 308, 404, 410 (never retried!)
         is_success = (status_code in (200, 301, 302, 303, 307, 308, 404, 410)) and not is_challenge

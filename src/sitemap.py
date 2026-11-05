@@ -159,6 +159,7 @@ class SitemapDiscovery:
         target_domain: str,
         http_client: httpx.Client | None = None,
         max_urls: int = 1000,
+        preserve_trailing_slash: bool = True,
     ) -> None:
         clean_domain = target_domain.lower().replace("https://", "").replace("http://", "").strip("/")
         self.target_domain = clean_domain
@@ -166,6 +167,7 @@ class SitemapDiscovery:
         self._client = http_client or httpx.Client(timeout=15.0, follow_redirects=True)
         self._owns_client = http_client is None
         self.max_urls = max_urls
+        self.preserve_trailing_slash = preserve_trailing_slash
 
     def discover_urls(self) -> list[str]:
         """Fetch robots.txt for sitemap declarations, then check common sitemap endpoints."""
@@ -206,12 +208,16 @@ class SitemapDiscovery:
             self._client.close()
 
         # Always ensure base_url is present
-        normalized_root = normalize_url(self.base_url)
+        normalized_root = normalize_url(self.base_url, preserve_trailing_slash=self.preserve_trailing_slash)
         if normalized_root:
             discovered.add(normalized_root)
 
         # Retain only internal URLs up to max_urls
-        valid = [u for u in discovered if is_internal_url(u, self.target_domain)]
+        valid = [
+            u
+            for u in discovered
+            if is_internal_url(u, self.target_domain, preserve_trailing_slash=self.preserve_trailing_slash)
+        ]
         return valid[: self.max_urls]
 
     def _fetch_and_parse_sitemap(
@@ -239,7 +245,7 @@ class SitemapDiscovery:
             xml_str = content.decode("utf-8", errors="ignore")
             # Clean XML of namespaces, prefixes and schema locations for reliable parsing
             xml_clean = re.sub(r'<([a-zA-Z0-9_-]+):', r'<\1_', xml_str)
-            xml_clean = re.sub(r'</([a-zA-Z0-9_-]+):', r'</\1_', xml_clean)
+            xml_clean = re.sub(r'</([a-zA-Z0-9_-]+):', r'</\1_', xml_str if xml_clean == xml_str else xml_clean)
             xml_clean = re.sub(r'\sxmlns(?::[a-zA-Z0-9_-]+)?="[^"]*"', '', xml_clean)
             xml_clean = re.sub(r'\sxsi:[a-zA-Z0-9_-]+="[^"]*"', '', xml_clean)
             root = ET.fromstring(xml_clean)
@@ -258,8 +264,10 @@ class SitemapDiscovery:
                 for url_elem in root.findall(".//url"):
                     loc = url_elem.find("loc")
                     if loc is not None and loc.text:
-                        norm = normalize_url(loc.text.strip())
-                        if norm and is_internal_url(norm, self.target_domain):
+                        norm = normalize_url(loc.text.strip(), preserve_trailing_slash=self.preserve_trailing_slash)
+                        if norm and is_internal_url(
+                            norm, self.target_domain, preserve_trailing_slash=self.preserve_trailing_slash
+                        ):
                             results.add(norm)
                             if len(results) >= self.max_urls:
                                 break

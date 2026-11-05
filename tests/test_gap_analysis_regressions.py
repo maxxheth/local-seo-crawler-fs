@@ -289,12 +289,12 @@ def test_gap6_script_and_style_tags_do_not_leak_nap_data() -> None:
     assert "512-555-9999" not in record.nap_found.phones
     assert "(512) 555-9999" not in record.nap_found.phones
 
-    # Visible / tel phone must be captured
-    assert "(713) 555-1234" in record.nap_found.phones
+    # Visible / tel phone must be captured and deduplicated (no separate unformatted '7135551234' in phones)
+    assert record.nap_found.phones == ["(713) 555-1234"]
     assert "7135551234" in record.nap_found.tel_links
 
-    # Address must match visible address only
-    assert any("Houston" in a for a in record.nap_found.addresses)
+    # Address must match visible address only and NOT include trailing digits '1234' from preceding phone number
+    assert record.nap_found.addresses == ["123 Main St, Houston, TX 77002"]
     assert not any("Corporate Blvd" in a for a in record.nap_found.addresses)
 
 
@@ -441,3 +441,74 @@ def test_gap8_link_target_sync_and_evidence_manifest_persistence(tmp_path: Path)
     loaded_manifest = EvidenceManifest.model_validate_json(evidence_file.read_text())
     assert len(loaded_manifest.records) == 1
     assert loaded_manifest.records[0].verbatim_text == "Face to Face Spa"
+
+
+def test_code_review_fixes_backfill_and_summary_rollup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify code review fixes:
+    1. get_unvisited_link_targets() backfills known page statuses first (does not re-verify crawled pages).
+    2. HTTP 500 issues use severity='error' and are counted in SiteAuditSummary.errors_count.
+    3. Non-200 pages (e.g. 404/301) with 0 inlinks are not counted as orphan pages.
+    4. load_targets propagates in_sitemap=True and preserve_trailing_slash to seeded targets.
+    """
+    import src.scraper as scraper
+    from src.seo_auditor import generate_site_summary
+
+    # 1. get_unvisited_link_targets backfills already-crawled pages
+    db_path = tmp_path / "test_review.db"
+    storage = SQLiteStorage(db_path)
+    storage.save_page({"url": "https://facetofacespa.com/", "status_code": 200}, domain="facetofacespa.com")
+    storage.save_page({"url": "https://facetofacespa.com/about/", "status_code": 200}, domain="facetofacespa.com")
+    storage.save_internal_links_batch([
+        {
+            "source_url": "https://facetofacespa.com/",
+            "target_url": "https://facetofacespa.com/about",  # trailing-slash variant of crawled page
+            "anchor_text": "About Us",
+            "placement": "navigation",
+            "is_nofollow": False,
+        },
+        {
+            "source_url": "https://facetofacespa.com/",
+            "target_url": "https://facetofacespa.com/brochure.pdf",  # genuinely unvisited
+            "anchor_text": "Brochure",
+            "placement": "body",
+            "is_nofollow": False,
+        },
+    ])
+
+    unvisited = storage.get_unvisited_link_targets()
+    assert unvisited == ["https://facetofacespa.com/brochure.pdf"]
+
+    # 2 & 3. HTTP 500 severity rollup and non-200 orphan exclusion
+    p_root = PageTechnicalRecord(url="https://facetofacespa.com/", status_code=200, inlinks_count=0)
+    p_500 = PageTechnicalRecord(url="https://facetofacespa.com/broken-500", status_code=500, inlinks_count=0)
+    p_500.issues = audit_page(p_500)
+    p_404 = PageTechnicalRecord(url="https://facetofacespa.com/missing-404", status_code=404, inlinks_count=0)
+    p_404.issues = audit_page(p_404)
+
+    summary = generate_site_summary([p_root, p_500, p_404])
+    assert summary.errors_count == 2  # Both 500 and 404 counted in errors_count
+    assert summary.total_issues == 2
+    assert summary.orphan_pages_count == 0  # Neither 500 nor 404 is counted as an orphan page
+
+    # 4. load_targets sets in_sitemap and respects preserve_trailing_slash=False
+    monkeypatch.setattr(
+        "src.scraper.SitemapDiscovery.discover_urls",
+        lambda self: ["https://facetofacespa.com/services/hydrafacial"],
+    )
+    targets = scraper.load_targets(
+        mode="competitor",
+        input_path="",
+        domain="facetofacespa.com",
+        query="",
+        location="",
+        business_name="",
+        use_sitemap=True,
+        max_pages=50,
+        preserve_trailing_slash=False,
+    )
+    by_url = {t["url"]: t for t in targets}
+    assert "https://facetofacespa.com/services/hydrafacial" in by_url
+    assert by_url["https://facetofacespa.com/services/hydrafacial"]["in_sitemap"] is True
+    assert by_url["https://facetofacespa.com/services/hydrafacial"]["preserve_trailing_slash"] is False
+    assert by_url["https://facetofacespa.com/"]["in_sitemap"] is False
+

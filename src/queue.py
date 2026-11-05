@@ -97,7 +97,8 @@ class SQLiteFrontierQueue(FrontierQueue):
         with self._get_conn() as conn:
             for t in targets:
                 raw_u = t.get("url", "")
-                norm_u = normalize_url(raw_u) or raw_u
+                preserve_ts = bool(t.get("preserve_trailing_slash", True))
+                norm_u = normalize_url(raw_u, preserve_trailing_slash=preserve_ts) or raw_u
                 t_copy = dict(t)
                 t_copy["url"] = norm_u
 
@@ -131,6 +132,7 @@ class SQLiteFrontierQueue(FrontierQueue):
         if chunk_size <= 0:
             return []
         with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 f"SELECT id, data FROM {self.queue_name}_jobs WHERE status = 'pending' ORDER BY id ASC LIMIT ?",
                 (chunk_size,),
@@ -220,7 +222,8 @@ class RedisFrontierQueue(FrontierQueue):
         pipeline = self.client.pipeline()
         for t in targets:
             raw_u = t.get("url", "")
-            norm_u = normalize_url(raw_u) or raw_u
+            preserve_ts = bool(t.get("preserve_trailing_slash", True))
+            norm_u = normalize_url(raw_u, preserve_trailing_slash=preserve_ts) or raw_u
             t_copy = dict(t)
             t_copy["url"] = norm_u
 

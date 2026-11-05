@@ -115,7 +115,7 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig | None = None) -
         issues.append(
             SEOIssue(
                 url=url,
-                severity="critical",
+                severity="error",
                 category="Technical",
                 issue=f"HTTP {status} Server Error",
                 details=f"Page returned server error status code {status}",
@@ -491,10 +491,10 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig | None = None) -
 # ── Near-Duplicate Content Detection (Token-Dice with Prefix Filtering) ───────
 
 _DUP_WEIGHTS = {
-    "title": 0.35,
-    "desc": 0.35,
-    "h1": 0.20,
-    "word_count": 0.10,
+    "title": 0.40 / 1.20,  # Minimum normalized title weight when both desc (0.25) and body (0.20) are present
+    "desc": 0.25 / 1.20,
+    "h1": 0.25 / 1.20,
+    "word_count": 0.10 / 1.20,
 }
 
 
@@ -581,7 +581,7 @@ def detect_duplicate_pages(
         if "noindex" in robots or "noindex" in x_robots:
             continue
         url = p.get("url", "") if isinstance(p, dict) else getattr(p, "url", "")
-        if any(pat in url.lower() for pat in ("/thank-you", "/thankyou", "/confirmation")):
+        if any(pat in url.lower() for pat in ("thank-you", "thankyou", "confirmation", "form-received", "quote-received")):
             continue
 
         raw_title = p.get("title", "") if isinstance(p, dict) else getattr(p, "title", "")
@@ -721,8 +721,8 @@ def generate_site_summary(pages: list[PageTechnicalRecord]) -> SiteAuditSummary:
         if p.generator:
             generators.add(p.generator)
 
-        # Inlinks
-        if p.inlinks_count == 0 and p.url != pages[0].url:
+        # Inlinks (only count indexable 200 OK pages after root as orphans)
+        if p.status_code == 200 and p.inlinks_count == 0 and p.url != pages[0].url:
             orphans += 1
 
         # Broken outlinks
@@ -757,7 +757,7 @@ def generate_site_summary(pages: list[PageTechnicalRecord]) -> SiteAuditSummary:
         # Issues
         for iss in p.issues:
             issues_by_cat[iss.category] += 1
-            if iss.severity == "error":
+            if iss.severity in ("error", "critical"):
                 errors_count += 1
             elif iss.severity == "warning":
                 warnings_count += 1

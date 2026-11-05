@@ -76,6 +76,7 @@ def _process_chunk_worker(
                 "query",
                 "location",
                 "domain",
+                "in_sitemap",
                 "preserve_trailing_slash",
             ):
                 if k in target_info:
@@ -289,6 +290,7 @@ class CrawlerOrchestrator:
             self.business_name,
             use_sitemap=self.use_sitemap,
             max_pages=self.max_pages,
+            preserve_trailing_slash=self.preserve_trailing_slash,
         )
 
         for t in initial_targets:
@@ -466,19 +468,21 @@ class CrawlerOrchestrator:
 
         # Post-Crawl Graph & Duplication Analysis Pass for competitor mode
         if self.mode == "competitor":
-            # If verify_all_links enabled, inspect any unvisited link targets
+            # Backfill link statuses from already-crawled pages first so we only verify truly unvisited links
+            self.storage.backfill_link_statuses_from_pages()
+
+            # If verify_all_links enabled, inspect any remaining unvisited link targets
             if self.verify_all_links:
                 unvisited = self.storage.get_unvisited_link_targets()
                 if unvisited:
                     print(f"Verifying {len(unvisited)} unvisited link targets (--verify-all-links)...")
                     status_map: dict[str, int] = {}
-                    with httpx.Client(timeout=10.0, follow_redirects=True, headers=dict(scraper.DEFAULT_HEADERS)) as v_client:
+                    with httpx.Client(timeout=10.0, follow_redirects=False, headers=dict(scraper.DEFAULT_HEADERS)) as v_client:
                         for u_target in unvisited:
-                            try:
-                                v_res = v_client.get(u_target)
-                                status_map[u_target] = v_res.status_code
-                            except Exception:
-                                status_map[u_target] = 500
+                            v_res = scraper.fetch_with_redirect_inspection(v_client, u_target, timeout=10.0)
+                            v_status = int(v_res.get("redirect_target_status") or v_res.get("status_code") or 0)
+                            if v_status > 0:
+                                status_map[u_target] = v_status
                     self.storage.update_link_target_statuses(status_map)
 
             print("Analyzing site link graph and checking for near-duplicate pages...")

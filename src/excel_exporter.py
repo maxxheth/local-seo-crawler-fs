@@ -202,8 +202,10 @@ def write_site_crawl_excel(
     info = summary.info_count if summary else sum(sum(1 for i in p.issues if i.severity == "info") for p in page_objs)
     dup_pages = summary.duplicate_pages_count if summary else 0
     broken_links = summary.broken_internal_links_count if summary else sum(len(p.broken_outlinks) for p in page_objs)
-    orphan_pages = summary.orphan_pages_count if summary else sum(1 for idx, p in enumerate(page_objs) if p.inlinks_count == 0 and idx > 0)
+    orphan_pages = summary.orphan_pages_count if summary else sum(1 for idx, p in enumerate(page_objs) if p.status_code == 200 and p.inlinks_count == 0 and idx > 0)
     avg_speed = summary.avg_response_time_ms if summary else round(sum(p.response_time_ms for p in page_objs) / max(1, len(page_objs)), 1)
+    median_speed = summary.median_response_time_ms if summary else avg_speed
+    p95_speed = summary.p95_response_time_ms if summary else avg_speed
 
     kpis = [
         ("Total Pages Crawled", len(page_objs), "Indexable and non-indexable discovered URLs"),
@@ -215,6 +217,8 @@ def write_site_crawl_excel(
         ("Broken Internal Links (4xx/5xx)", broken_links, "Links pointing to internal 404/5xx error targets"),
         ("Orphan Pages (0 Inlinks)", orphan_pages, "Pages not linked from any internal crawl page"),
         ("Average Server Response Time", f"{avg_speed} ms", "Recommended: < 1,000 ms"),
+        ("Median Server Response Time", f"{median_speed} ms", "50th percentile response latency"),
+        ("p95 Server Response Time", f"{p95_speed} ms", "95th percentile tail latency"),
     ]
 
     for row_idx, (metric, val, note) in enumerate(kpis, start=5):
@@ -231,11 +235,11 @@ def write_site_crawl_excel(
             _style_status_cell(c2, "error")
         elif metric == "Warnings" and warnings > 0:
             _style_status_cell(c2, "warning")
-        elif metric in ("Total Pages Crawled", "Average Server Response Time"):
+        elif metric in ("Total Pages Crawled", "Average Server Response Time", "Median Server Response Time"):
             _style_status_cell(c2, "ok")
 
     # Section: Issues by Category
-    start_cat_row = 16
+    start_cat_row = 5 + len(kpis) + 2
     ws_summary.cell(row=start_cat_row, column=1, value="SEO Defects by Category").font = Font(name="Calibri", size=12, bold=True)
     cat_headers = ["Category", "Issues Count", "Distribution"]
     for c_idx, h in enumerate(cat_headers, start=1):
@@ -277,6 +281,12 @@ def write_site_crawl_excel(
     if summary and summary.cms_generators_detected:
         for gen in summary.cms_generators_detected:
             detected_stack.append((gen, "CMS / Framework"))
+    if summary and summary.server_stack_detected:
+        for srv in summary.server_stack_detected:
+            detected_stack.append((srv, "Web Server / CDN"))
+    if summary and summary.caching_detected:
+        for c_hdr in summary.caching_detected:
+            detected_stack.append((c_hdr, "HTTP Cache Status"))
 
     if not detected_stack:
         # Fallback inspection across pages
@@ -342,6 +352,12 @@ def write_site_crawl_excel(
         "Viewport Tag",
         "Robots Meta",
         "Generator / CMS",
+        "Initial HTTP Status",
+        "Redirect Chain",
+        "TTFB (ms)",
+        "Server Header",
+        "Cache Status",
+        "In Sitemap",
     ]
     for c_idx, h in enumerate(page_headers, start=1):
         ws_pages.cell(row=1, column=c_idx, value=h)
@@ -382,6 +398,12 @@ def write_site_crawl_excel(
         ws_pages.cell(row=r_idx, column=25, value=p.viewport)
         ws_pages.cell(row=r_idx, column=26, value=p.meta_robots)
         ws_pages.cell(row=r_idx, column=27, value=p.generator)
+        ws_pages.cell(row=r_idx, column=28, value=p.initial_status_code or p.status_code)
+        ws_pages.cell(row=r_idx, column=29, value=" -> ".join(p.redirect_chain) if p.redirect_chain else "")
+        ws_pages.cell(row=r_idx, column=30, value=p.ttfb_ms)
+        ws_pages.cell(row=r_idx, column=31, value=p.server_header)
+        ws_pages.cell(row=r_idx, column=32, value=p.cache_status)
+        ws_pages.cell(row=r_idx, column=33, value="Yes" if p.in_sitemap else "No")
 
     _apply_table_styling(ws_pages, start_row=1)
 

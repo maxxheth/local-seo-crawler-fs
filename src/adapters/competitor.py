@@ -28,7 +28,7 @@ PHONE_PATTERN = re.compile(
 )
 
 ADDRESS_REGEX = re.compile(
-    r"\b\d{1,5}\s+[A-Za-z0-9\s.,#-]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Trail|Trl|Way|Court|Ct|Circle|Cir|Suite|Ste|Pkwy|Parkway)\b[^\n,]*,\s*[A-Za-z\s]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?",
+    r"(?<!-)\b\d{1,6}\s+(?:[NSEW]\.?\s+)?(?:[A-Za-z][A-Za-z0-9.\s,#&-]{1,45}?|\d{1,4}(?:st|nd|rd|th)\s+[A-Za-z0-9.\s,#&-]{0,35}?)\s+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Trail|Trl|Way|Court|Ct|Circle|Cir|Suite|Ste|Pkwy|Parkway|Hwy|Highway)\b[^\n,]*,\s*[A-Za-z\s]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?",
     re.IGNORECASE,
 )
 
@@ -279,22 +279,7 @@ class CompetitorSiteAdapter:
             if name and cnt:
                 twitter_tags[name] = cnt
 
-        # 2. Heading hierarchy in DOM order (H1, H2, H3)
-        h1_list: list[str] = []
-        h2_list: list[str] = []
-        h3_list: list[str] = []
-        for tag in tree.css("h1, h2, h3"):
-            text = tag.text()
-            if text:
-                cleaned = " ".join(text.split()).strip()
-                if tag.tag == "h1":
-                    h1_list.append(cleaned)
-                elif tag.tag == "h2":
-                    h2_list.append(cleaned)
-                elif tag.tag == "h3":
-                    h3_list.append(cleaned)
-
-        # 3. Schema.org graph extraction (JSON-LD + Microdata)
+        # 2. Schema.org graph extraction (JSON-LD + Microdata) — extracted before script decomposition
         schema_jsonld: list[dict[str, Any]] = []
         schema_types: set[str] = set()
 
@@ -331,6 +316,25 @@ class CompetitorSiteAdapter:
                 type_name = itype.split("/")[-1]
                 if type_name:
                     schema_types.add(type_name)
+
+        # DOM cleaning: Remove non-visible tags before headings, links, NAP, and visible body text analysis
+        for non_vis in tree.css("script, style, noscript, template, svg"):
+            non_vis.decompose()
+
+        # 3. Heading hierarchy in DOM order (H1, H2, H3)
+        h1_list: list[str] = []
+        h2_list: list[str] = []
+        h3_list: list[str] = []
+        for tag in tree.css("h1, h2, h3"):
+            text = tag.text()
+            if text:
+                cleaned = " ".join(text.split()).strip()
+                if tag.tag == "h1":
+                    h1_list.append(cleaned)
+                elif tag.tag == "h2":
+                    h2_list.append(cleaned)
+                elif tag.tag == "h3":
+                    h3_list.append(cleaned)
 
         # 4. Image & Accessibility Audit
         total_images = 0
@@ -459,7 +463,13 @@ class CompetitorSiteAdapter:
             clean = re.sub(r"[^\d+]", "", raw_tel)
             if clean:
                 found_tel_links.add(clean)
-                found_phones.add(clean)
+                digits = re.sub(r"\D", "", clean)
+                if len(digits) == 10:
+                    found_phones.add(f"({digits[:3]}) {digits[3:6]}-{digits[6:]}")
+                elif len(digits) == 11 and digits.startswith("1"):
+                    found_phones.add(f"({digits[1:4]}) {digits[4:7]}-{digits[7:]}")
+                else:
+                    found_phones.add(clean)
 
         for iframe in tree.css("iframe[src*='google.com/maps'], iframe[src*='maps.google.com']"):
             src = iframe.attributes.get("src", "").strip()
@@ -481,22 +491,19 @@ class CompetitorSiteAdapter:
                 if m_q:
                     found_map_coords.add(f"{m_q.group(1)},{m_q.group(2)}")
 
-        for addr_tag in tree.css("address, .address, [class*='address'], [class*='location'], [itemprop='address']"):
+        for addr_tag in tree.css("address, .address, [class*='address'], [itemprop='address']"):
             txt = " ".join(addr_tag.text().split()).strip()
-            if txt and len(txt) < 250:
+            if txt and len(txt) < 250 and any(ch.isdigit() for ch in txt):
                 found_addresses.add(txt)
 
         footer = tree.css_first("footer")
         if footer:
-            for addr_tag in footer.css("address, .address, [class*='address'], [class*='location']"):
+            for addr_tag in footer.css("address, .address, [class*='address'], [itemprop='address']"):
                 txt = " ".join(addr_tag.text().split()).strip()
-                if txt and len(txt) < 250:
+                if txt and len(txt) < 250 and any(ch.isdigit() for ch in txt):
                     found_addresses.add(txt)
 
-        # 7. DOM cleaning: Remove non-visible tags before visible body text & token analysis
-        for non_vis in tree.css("script, style, noscript, template, svg"):
-            non_vis.decompose()
-
+        # 7. Visible body text & token analysis
         body = tree.css_first("body")
         visible_body_text = body.text(separator=" ") if body else ""
 
