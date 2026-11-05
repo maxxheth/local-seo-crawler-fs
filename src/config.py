@@ -68,6 +68,14 @@ def load_config() -> dict[str, Any]:
     large_warn_bytes = int(os.getenv("SEO_LARGE_WARN_BYTES", "1048576"))
     large_err_bytes = int(os.getenv("SEO_LARGE_ERR_BYTES", "3145728"))
 
+    # Post-crawl classification & performance
+    hub_min_links = int(os.getenv("HUB_MIN_LINKS", "10"))
+    locations_file = os.getenv("LOCATIONS_FILE", "").strip()
+    corporate_share = float(os.getenv("CORPORATE_SHARE", "0.40"))
+    timing_sample = int(os.getenv("TIMING_SAMPLE", "0"))
+    psi_api_key = os.getenv("PSI_API_KEY", "").strip()
+    psi_sample = int(os.getenv("PSI_SAMPLE", "0"))
+
     return {
         "project_root": str(project_root),
         "flaresolverr_url": flaresolverr_url,
@@ -103,6 +111,12 @@ def load_config() -> dict[str, Any]:
         "slow_err_ms": slow_err_ms,
         "large_warn_bytes": large_warn_bytes,
         "large_err_bytes": large_err_bytes,
+        "hub_min_links": hub_min_links,
+        "locations_file": locations_file,
+        "corporate_share": corporate_share,
+        "timing_sample": timing_sample,
+        "psi_api_key": psi_api_key,
+        "psi_sample": psi_sample,
     }
 
 

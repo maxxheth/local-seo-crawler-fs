@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 import httpx
 
 from src.adapters.competitor import CompetitorSiteAdapter
@@ -212,7 +214,11 @@ def test_gap4_non_200_pages_do_not_emit_content_seo_issues() -> None:
 # ---------------------------------------------------------------------------
 
 def test_gap5_bare_domain_link_extraction() -> None:
-    """Verify bare domain outlinks (e.g., href='facetofacefranchising.com') are treated as external and not relative paths."""
+    """Scheme-less hrefs that look like domains resolve relative to the document, as browsers do.
+
+    (Supersedes the 2026-11-04 behaviour that rewrote them to https://<href>; see WS1 of
+    plans/2026-11-05-crawler-accuracy-and-deterministic-reporting.md.)
+    """
     html = """
     <!DOCTYPE html>
     <html>
@@ -222,6 +228,7 @@ def test_gap5_bare_domain_link_extraction() -> None:
       <a href="/locations/austin/">Austin Location</a>
       <a href="facetofacefranchising.com/opportunities">Franchise Opportunities</a>
       <a href="www.externalportal.com">Partner Portal</a>
+      <a href="https://www.youtube.com/watch?v=abc">Real external</a>
     </body>
     </html>
     """
@@ -233,18 +240,24 @@ def test_gap5_bare_domain_link_extraction() -> None:
         final_url="https://facetofacespa.com/locations/",
     )
 
-    # 1. Internal outlink count is 1 (only /locations/austin/)
-    assert record.internal_outlinks_count == 1
-    # 2. External outlink count is 2 (facetofacefranchising.com and www.externalportal.com)
-    assert record.external_outlinks_count == 2
-
-    # 3. Discovered internal URLs must NOT contain any bare domain pseudo-relative path
-    assert not any("facetofacefranchising.com" in u for u in discovered_urls)
+    # Bare-domain hrefs are relative paths under the document base (internal), not external
+    assert record.internal_outlinks_count == 3
+    assert record.external_outlinks_count == 1
+    # Malformed targets are recorded as edges but never queued (crawl-trap guard)
     assert discovered_urls == ["https://facetofacespa.com/locations/austin/"]
 
-    # 4. Internal link edges only contain internal targets
-    internal_targets = [e.target_url for e in link_edges]
-    assert internal_targets == ["https://facetofacespa.com/locations/austin/"]
+    by_target = {e.target_url: e for e in link_edges}
+    normal = by_target["https://facetofacespa.com/locations/austin/"]
+    assert normal.malformed_relative is False and normal.intended_host == ""
+
+    franchise = by_target["https://facetofacespa.com/locations/facetofacefranchising.com/opportunities"]
+    assert franchise.malformed_relative is True
+    assert franchise.intended_host == "facetofacefranchising.com"
+    assert franchise.raw_href == "facetofacefranchising.com/opportunities"
+
+    portal = by_target["https://facetofacespa.com/locations/www.externalportal.com"]
+    assert portal.malformed_relative is True
+    assert portal.intended_host == "www.externalportal.com"
 
 
 # ---------------------------------------------------------------------------
@@ -303,8 +316,11 @@ def test_gap6_script_and_style_tags_do_not_leak_nap_data() -> None:
 # ---------------------------------------------------------------------------
 
 def test_gap7_new_seo_audit_rules() -> None:
-    """Verify new audit rules: Noindex in Sitemap, Indexable Thank-You/Staging, Missing LocalBusiness Schema."""
-    # 1. Noindex Page in Sitemap
+    """Noindex-in-sitemap stays a per-page rule; thank-you, prototype and LocalBusiness rules
+    are site-context rules keyed on post-crawl page type (WS4/WS5)."""
+    from src.seo_auditor import audit_site_context
+
+    # 1. Noindex Page in Sitemap (per-page)
     rec_sitemap_noindex = PageTechnicalRecord(
         url="https://facetofacespa.com/landing-page/",
         status_code=200,
@@ -318,45 +334,47 @@ def test_gap7_new_seo_audit_rules() -> None:
     issues1 = audit_page(rec_sitemap_noindex)
     assert any(i.issue == "Noindex Page in Sitemap" and i.severity == "error" for i in issues1)
 
-    # 2. Indexable Thank-You Page
-    rec_thank_you = PageTechnicalRecord(
-        url="https://facetofacespa.com/appointment-confirmation-thank-you/",
-        status_code=200,
-        meta_robots="index, follow",
-        title="Thank You",
-        meta_description="Desc",
-        h1=["H1"],
-        viewport="width=device-width",
-    )
-    issues2 = audit_page(rec_thank_you)
-    assert any(i.issue == "Indexable Thank-You / Confirmation Page" and i.severity == "warning" for i in issues2)
-
-    # 3. Indexable Prototype / Staging Page
-    rec_staging = PageTechnicalRecord(
-        url="https://facetofacespa.com/staging-prototype-demo/",
-        status_code=200,
-        meta_robots="index",
-        title="Staging Test",
-        meta_description="Desc",
-        h1=["H1"],
-        viewport="width=device-width",
-    )
-    issues3 = audit_page(rec_staging)
-    assert any(i.issue == "Indexable Prototype / Staging Page" and i.severity == "warning" for i in issues3)
-
-    # 4. Missing LocalBusiness / Clinic Schema on location page
-    rec_location = PageTechnicalRecord(
+    # Context rules are no longer emitted by the per-page audit
+    rec_location_url = PageTechnicalRecord(
         url="https://facetofacespa.com/locations/sugar-land-tx/",
         status_code=200,
-        meta_robots="index",
-        schema_types=["WebPage", "BreadcrumbList"],
+        schema_types=["WebPage"],
         title="Sugar Land",
         meta_description="Desc",
         h1=["H1"],
         viewport="width=device-width",
     )
-    issues4 = audit_page(rec_location)
-    assert any(i.issue == "Missing LocalBusiness / Clinic Schema" and i.severity == "warning" for i in issues4)
+    assert not any(i.issue == "Missing LocalBusiness / Clinic Schema" for i in audit_page(rec_location_url))
+
+    # 2-4. Site-context rules from page type
+    pages = [
+        {
+            "url": "https://facetofacespa.com/appointment-confirmation-thank-you/",
+            "status_code": 200,
+            "meta_robots": "index, follow",
+            "page_type": "utility_page",
+        },
+        {
+            "url": "https://facetofacespa.com/staging-prototype-demo/",
+            "status_code": 200,
+            "meta_robots": "index",
+            "page_type": "other",
+        },
+        {
+            "url": "https://facetofacespa.com/sugar-land/",
+            "status_code": 200,
+            "meta_robots": "index",
+            "schema_types": ["WebPage", "BreadcrumbList"],
+            "page_type": "clinic_location",
+            "location_status": "open",
+            "nap_found": {"addresses": ["123 Main St, Sugar Land, TX 77478"]},
+        },
+    ]
+    ctx = audit_site_context(pages, links=[])
+    names = {(u, i.issue, i.severity) for u, iss in ctx.items() for i in iss}
+    assert ("https://facetofacespa.com/appointment-confirmation-thank-you/", "Indexable Thank-You / Confirmation Page", "warning") in names
+    assert ("https://facetofacespa.com/staging-prototype-demo/", "Indexable Prototype / Staging Page", "warning") in names
+    assert ("https://facetofacespa.com/sugar-land/", "Missing LocalBusiness / Clinic Schema", "warning") in names
 
     # 5. Duplicate page detection excludes redirects and 404s
     page_redirect = {

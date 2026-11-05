@@ -204,7 +204,9 @@ def test_seo_auditor_rules_and_duplication() -> None:
     assert "Thin Content" in issue_names
     assert "Noindex Tag Present" in issue_names
     assert "Missing Viewport Meta Tag" in issue_names
-    assert "Slow Response Time" in issue_names
+    # WS6: crawler-measured timing is informational, never a warning
+    slow = [i for i in issues if i.issue == "Slow Crawl Response (crawler-measured)"]
+    assert len(slow) == 1 and slow[0].severity == "info"
     assert "Canonical Points to Different URL" not in issue_names
 
     # Test Duplicate Detection

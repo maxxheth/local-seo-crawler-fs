@@ -4,13 +4,44 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date
+from fnmatch import fnmatch
 import math
 import re
 import time
 from typing import Any
+from urllib.parse import urlparse
 
+from src.classifier import (
+    CONVERSION_UTILITY_TOKENS,
+    DEFAULT_PROTOTYPE_TOKENS,
+    LOCAL_SCHEMA_TYPES,
+    corporate_values,
+    find_stale_dates,
+    is_noindex,
+    is_prototype_url,
+    page_address_keys,
+    token_in_segments,
+    url_key,
+)
 from src.models import PageTechnicalRecord, SEOIssue, SiteAuditSummary
 from src.sitemap import canonical_url_key, normalize_url
+from src.storage import SITE_CONTEXT_ISSUE_NAMES  # noqa: F401 (re-exported)
+
+SLOW_CRAWL_RESPONSE = "Slow Crawl Response (crawler-measured)"
+SLOW_SAMPLED_RESPONSE = "Slow Server Response (sequential sample)"
+ISSUE_MISSING_LOCAL_SCHEMA = "Missing LocalBusiness / Clinic Schema"
+ISSUE_THANK_YOU = "Indexable Thank-You / Confirmation Page"
+ISSUE_PROTOTYPE = "Indexable Prototype / Staging Page"
+ISSUE_PROTOTYPE_NOINDEX = "Prototype / Staging Page"
+ISSUE_STAGING_HOST = "Staging Hostname Reference"
+ISSUE_MISSING_ADDRESS = "Clinic Page Missing Visible Address"
+ISSUE_CLOSED_CLINIC = "Closed/moved clinic page: confirm indexing and schema approach"
+ISSUE_OWNERSHIP = "Ownership transferred: confirm LocalBusiness schema"
+ISSUE_STALE_NOTICE = "Stale Status Notice"
+ISSUE_DUPLICATE_ADDRESS = "Duplicate Clinic Address"
+
+DEFAULT_STAGING_HOST_PATTERNS = ("staging*", "*.staging.*", "*-staging.*", "*.on-forge.com", "dev.*")
 
 _TOKEN_SPLIT = re.compile(r"\W+")
 DUPLICATION_TIME_BUDGET_SECONDS = 10.0
@@ -30,6 +61,12 @@ class SEOAuditConfig:
     slow_err_ms: int = 3000
     large_warn_bytes: int = 1048576  # 1 MB
     large_err_bytes: int = 3145728   # 3 MB
+    # Site-context (post-crawl) rules
+    prototype_tokens: tuple[str, ...] = DEFAULT_PROTOTYPE_TOKENS
+    prototype_allowlist: tuple[str, ...] = ()
+    staging_host_patterns: tuple[str, ...] = DEFAULT_STAGING_HOST_PATTERNS
+    corporate_share: float = 0.40
+    crawl_date: date | None = None
 
 
 def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig | None = None) -> list[SEOIssue]:
@@ -48,7 +85,11 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig | None = None) -
                 severity="error",
                 category="Technical",
                 issue="Transport Error",
-                details=record.transport_error,
+                details=(
+                    f"[{record.transport_error_type}] {record.transport_error}"
+                    if record.transport_error_type
+                    else record.transport_error
+                ),
             )
         )
         if status != 200:
@@ -73,7 +114,11 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig | None = None) -
                     severity="error",
                     category="Technical",
                     issue="Redirect Target Transport Error",
-                    details=f"Redirect {chain_str} target failed connection/SSL: {record.transport_error}",
+                    details=(
+                        f"Redirect {chain_str} target failed connection/SSL"
+                        f"{' [' + record.transport_error_type + ']' if record.transport_error_type else ''}: "
+                        f"{record.transport_error}"
+                    ),
                 )
             )
         else:
@@ -285,28 +330,8 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig | None = None) -
             )
         )
 
-    # Conversion & Staging Page Indexability Checks
-    if not is_noindex:
-        if any(pat in url.lower() for pat in ("thank-you", "thankyou", "confirmation", "form-received", "quote-received")):
-            issues.append(
-                SEOIssue(
-                    url=url,
-                    severity="warning",
-                    category="Indexability",
-                    issue="Indexable Thank-You / Confirmation Page",
-                    details="Conversion confirmation page is indexable by search engines; recommend adding 'noindex' directive",
-                )
-            )
-        if any(pat in url.lower() for pat in ("prototype", "staging", "test-page", "temp-", "draft-")):
-            issues.append(
-                SEOIssue(
-                    url=url,
-                    severity="warning",
-                    category="Indexability",
-                    issue="Indexable Prototype / Staging Page",
-                    details="Staging or prototype page is indexable; recommend adding 'noindex' or restricting access",
-                )
-            )
+    # Thank-you, prototype/staging and LocalBusiness rules depend on page type and the
+    # link graph; they run post-crawl in audit_site_context().
 
     # Canonical URL
     canon = (record.canonical_url or "").strip()
@@ -416,48 +441,22 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig | None = None) -
             )
         )
 
-    # Location / Facility specific LocalBusiness schema check
-    is_location_page = (
-        bool(record.nap_found.addresses)
-        or bool(record.nap_found.map_embed_coords)
-        or any(pat in url.lower() for pat in ("/locations/", "/austin", "/san-antonio", "/dallas", "/houston", "-tx", "/ranch", "/creek", "/spa"))
-    )
-    if is_location_page and not is_noindex:
-        has_local_schema = any(
-            t in record.schema_types
-            for t in ("LocalBusiness", "MedicalBusiness", "HealthAndBeautyBusiness", "DaySpa", "BeautySalon", "MedicalClinic", "Physician")
-        )
-        if not has_local_schema:
-            issues.append(
-                SEOIssue(
-                    url=url,
-                    severity="warning",
-                    category="Structured Data",
-                    issue="Missing LocalBusiness / Clinic Schema",
-                    details="Location or facility page lacks LocalBusiness or DaySpa Schema.org structured data",
-                )
-            )
-
-    # 10. Performance (Response Time & Size)
+    # 10. Performance. Crawl timings reflect crawler concurrency and network path, not
+    # user experience, so they are informational only. Sequentially sampled TTFB
+    # (--timing-sample) is evaluated post-crawl in audit_site_context().
     resp_time = record.response_time_ms
-    if resp_time > cfg.slow_err_ms:
+    if resp_time > cfg.slow_warn_ms:
+        limit = cfg.slow_err_ms if resp_time > cfg.slow_err_ms else cfg.slow_warn_ms
         issues.append(
             SEOIssue(
                 url=url,
-                severity="error",
+                severity="info",
                 category="Performance",
-                issue="Severe Response Time Delay",
-                details=f"Page response time was {resp_time}ms (exceeds {cfg.slow_err_ms}ms limit)",
-            )
-        )
-    elif resp_time > cfg.slow_warn_ms:
-        issues.append(
-            SEOIssue(
-                url=url,
-                severity="warning",
-                category="Performance",
-                issue="Slow Response Time",
-                details=f"Page response time was {resp_time}ms (recommended: <{cfg.slow_warn_ms}ms)",
+                issue=SLOW_CRAWL_RESPONSE,
+                details=(
+                    f"Crawler-measured fetch time was {resp_time}ms (above {limit}ms); "
+                    "reflects crawler concurrency and network path, not user experience"
+                ),
             )
         )
 
@@ -486,6 +485,185 @@ def audit_page(record: PageTechnicalRecord, cfg: SEOAuditConfig | None = None) -
         )
 
     return issues
+
+
+# ── Site-context rules (post-crawl; need page types and the link graph) ───────
+
+def _page_get(p: PageTechnicalRecord | dict[str, Any], key: str, default: Any = None) -> Any:
+    if isinstance(p, dict):
+        return p.get(key, default)
+    return getattr(p, key, default)
+
+
+def _host_matches(host: str, patterns: tuple[str, ...]) -> bool:
+    host = (host or "").lower().split(":")[0]
+    return bool(host) and any(fnmatch(host, pat.lower()) for pat in patterns)
+
+
+def audit_site_context(
+    pages: list[PageTechnicalRecord] | list[dict[str, Any]],
+    links: list[dict[str, Any]],
+    cfg: SEOAuditConfig | None = None,
+    timing_sample: dict[str, Any] | None = None,
+) -> dict[str, list[SEOIssue]]:
+    """Run rules that depend on post-crawl page classification and the link graph.
+
+    Returns {url: [SEOIssue, ...]}. Pages must already carry classification fields
+    (page_type, location_status, moved_to, status_evidence) from src.classifier.
+    """
+    cfg = cfg or SEOAuditConfig()
+    crawl_date = cfg.crawl_date or date.today()
+    raw = [p if isinstance(p, dict) else p.model_dump() for p in pages]
+    out: dict[str, list[SEOIssue]] = defaultdict(list)
+
+    def add(url: str, severity: str, category: str, issue: str, details: str) -> None:
+        out[url].append(SEOIssue(url=url, severity=severity, category=category, issue=issue, details=details))
+
+    inbound: dict[str, int] = defaultdict(int)
+    for e in links:
+        s_key, t_key = url_key(e.get("source_url", "")), url_key(e.get("target_url", ""))
+        if s_key != t_key:
+            inbound[t_key] += 1
+
+    _corp_phones, corp_addrs = corporate_values(raw, cfg.corporate_share)
+    by_key = {url_key(p.get("url", "")): p for p in raw}
+    site_hosts = {urlparse(p.get("url", "")).netloc.lower() for p in raw}
+
+    # Address keys per clinic page, computed once
+    clinic_addr_keys: dict[str, set[str]] = {}
+    addr_groups: dict[str, list[str]] = defaultdict(list)
+    for p in raw:
+        if p.get("page_type") == "clinic_location" and int(p.get("status_code") or 0) == 200:
+            keys = page_address_keys(p, corp_addrs)
+            clinic_addr_keys[p["url"]] = keys
+            for k in keys:
+                addr_groups[k].append(p["url"])
+
+    # Duplicate clinic addresses: pages sharing an address, minus those whose moved_to points
+    # at another page in the same group (computed once per address group)
+    unexplained_groups: dict[str, list[str]] = {}
+    for k, group in addr_groups.items():
+        if len(group) < 2:
+            continue
+        group_keys = {url_key(g) for g in group}
+        explained = {
+            g for g in group
+            if (by_key.get(url_key(g)) or {}).get("moved_to")
+            and url_key(by_key[url_key(g)]["moved_to"]) in group_keys
+        }
+        remaining = sorted(set(group) - explained)
+        if len(remaining) >= 2:
+            unexplained_groups[k] = remaining
+
+    allowlist = tuple(cfg.prototype_allowlist)
+
+    sampled = {}
+    if timing_sample:
+        for row in timing_sample.get("samples", []):
+            if row.get("ttfb_ms") is not None:
+                sampled[url_key(row.get("url", ""))] = row
+
+    for p in raw:
+        url = p.get("url", "")
+        status = int(p.get("status_code") or 0)
+        if status != 200:
+            continue
+        noindex = is_noindex(p)
+        ptype = p.get("page_type") or ""
+
+        # Clinic pages
+        if ptype == "clinic_location":
+            loc_status = p.get("location_status") or "unknown"
+            evidence = p.get("status_evidence") or {}
+            schema_types = set(p.get("schema_types") or [])
+            has_local_schema = bool(schema_types & set(LOCAL_SCHEMA_TYPES))
+            if loc_status in ("open", "unknown"):
+                if not noindex and not has_local_schema:
+                    add(url, "warning", "Structured Data", ISSUE_MISSING_LOCAL_SCHEMA,
+                        f"Clinic page ({loc_status}) lacks LocalBusiness/MedicalBusiness/DaySpa Schema.org structured data")
+            elif loc_status in ("closed", "temporarily_closed", "moved"):
+                detail = f"Clinic page status is {loc_status}"
+                if p.get("moved_to"):
+                    detail += f" (now served by {p['moved_to']})"
+                if evidence.get("source"):
+                    detail += f"; evidence: {evidence['source']}"
+                add(url, "info", "Local SEO", ISSUE_CLOSED_CLINIC,
+                    detail + "; confirm whether it should stay indexed and which LocalBusiness schema (if any) it carries")
+            elif loc_status == "ownership_transferred":
+                add(url, "info", "Local SEO", ISSUE_OWNERSHIP,
+                    "Ownership transferred: confirm whether this page should carry the brand's LocalBusiness schema "
+                    "(business decision, not inferred by the crawler)")
+            own_keys = clinic_addr_keys.get(url, set())
+            if not own_keys:
+                sev = "warning" if loc_status in ("open", "unknown", "coming_soon") else "info"
+                add(url, sev, "Local SEO", ISSUE_MISSING_ADDRESS,
+                    f"Clinic page ({loc_status}) shows no visible street address")
+            notice = evidence.get("page_notice") or evidence.get("directory_label") or ""
+            stale = find_stale_dates(notice, crawl_date)
+            if stale:
+                add(url, "warning", "Local SEO", ISSUE_STALE_NOTICE,
+                    f"Status notice references a date already past at crawl time ({crawl_date.isoformat()}): "
+                    f"{'; '.join(stale)} — notice: \"{notice[:200]}\"")
+            dup_with = sorted({
+                g for k in own_keys for g in unexplained_groups.get(k, []) if url in unexplained_groups[k] and g != url
+            })
+            if dup_with:
+                add(url, "warning", "Local SEO", ISSUE_DUPLICATE_ADDRESS,
+                    f"Displays the same address as {', '.join(dup_with)} with no moved_to relationship")
+
+        # Conversion confirmation pages
+        if ptype == "utility_page" and not noindex and token_in_segments(url, CONVERSION_UTILITY_TOKENS):
+            add(url, "warning", "Indexability", ISSUE_THANK_YOU,
+                "Conversion confirmation page is indexable by search engines; recommend adding 'noindex' directive")
+
+        # Prototype / staging pages (whole slug words only; never blog posts or archives)
+        if ptype not in ("blog_post", "blog_archive"):
+            hit = is_prototype_url(url, cfg.prototype_tokens, allowlist)
+            if hit:
+                linked = inbound.get(url_key(url), 0) > 0
+                in_sitemap = bool(p.get("in_sitemap"))
+                reason = f"slug word '{hit[0]}' in segment '{hit[1]}'"
+                if noindex:
+                    add(url, "info", "Indexability", ISSUE_PROTOTYPE_NOINDEX,
+                        f"Prototype/staging page ({reason}) is noindex; consider removing it or restricting access")
+                else:
+                    exposure = [x for x, flag in (("in XML sitemap", in_sitemap), ("linked internally", linked)) if flag]
+                    sev = "error" if exposure else "warning"
+                    add(url, sev, "Indexability", ISSUE_PROTOTYPE,
+                        f"Prototype/staging page ({reason}) is indexable"
+                        + (f" and {' and '.join(exposure)}" if exposure else "")
+                        + "; recommend noindex, removal, or access restriction")
+
+        # References to staging hosts
+        refs: list[tuple[str, str]] = []
+        for h in p.get("external_link_hosts") or []:
+            refs.append(("link", h))
+        canon = p.get("canonical_url") or ""
+        if canon:
+            refs.append(("canonical", urlparse(canon).netloc))
+        og_url = (p.get("og_tags") or {}).get("url") or ""
+        if og_url:
+            refs.append(("og:url", urlparse(og_url).netloc))
+        for hl in p.get("hreflang") or []:
+            refs.append(("hreflang", urlparse(hl.get("url", "")).netloc))
+        seen_refs: set[tuple[str, str]] = set()
+        for kind, host in refs:
+            host = (host or "").lower()
+            if not host or host in site_hosts or (kind, host) in seen_refs:
+                continue
+            if _host_matches(host, cfg.staging_host_patterns):
+                seen_refs.add((kind, host))
+                add(url, "error" if kind != "link" else "warning", "Technical", ISSUE_STAGING_HOST,
+                    f"{kind} points at staging-like host {host}")
+
+        # Sequential timing sample (WS6): only these timings can raise a warning
+        srow = sampled.get(url_key(url))
+        if srow and int(srow.get("ttfb_ms") or 0) > cfg.slow_warn_ms:
+            add(url, "warning", "Performance", SLOW_SAMPLED_RESPONSE,
+                f"Sequentially sampled TTFB was {srow['ttfb_ms']}ms (recommended: <{cfg.slow_warn_ms}ms; "
+                f"cache: {srow.get('cache_status') or 'n/a'})")
+
+    return dict(out)
 
 
 # ── Near-Duplicate Content Detection (Token-Dice with Prefix Filtering) ───────
@@ -559,11 +737,13 @@ def detect_duplicate_pages(
     pages: list[PageTechnicalRecord] | list[dict[str, Any]],
     threshold: float = 0.85,
     time_budget: float = DUPLICATION_TIME_BUDGET_SECONDS,
+    pairs_out: list[tuple[str, str, float]] | None = None,
 ) -> dict[str, SEOIssue]:
     """Detect near-duplicate or doorway pages across crawled records using Dice token similarity.
 
     Accepts both PageTechnicalRecord instances and raw page dicts from storage.
-    Returns mapping of url -> SEOIssue.
+    Returns mapping of url -> SEOIssue. If pairs_out is given, it is filled with
+    (url_a, url_b, similarity) edges whose connected components are the duplicate clusters.
     """
     candidates = []
     for p in pages:
@@ -581,6 +761,8 @@ def detect_duplicate_pages(
         if "noindex" in robots or "noindex" in x_robots:
             continue
         url = p.get("url", "") if isinstance(p, dict) else getattr(p, "url", "")
+        if _page_get(p, "page_type") == "utility_page":
+            continue
         if any(pat in url.lower() for pat in ("thank-you", "thankyou", "confirmation", "form-received", "quote-received")):
             continue
 
@@ -663,6 +845,15 @@ def detect_duplicate_pages(
             if compared % 2000 == 0 and time.monotonic() - started > time_budget:
                 break
 
+    if pairs_out is not None:
+        for g in groups:
+            for member in g[1:]:
+                pairs_out.append((g[0]["url"], member["url"], 1.0))
+        for i, partners_i in sorted(similar.items()):
+            for sim, j in partners_i:
+                if i < j:
+                    pairs_out.append((representatives[i]["url"], representatives[j]["url"], round(sim, 4)))
+
     # 3. Emit at most one consolidated issue per affected page
     duplicate_issues: dict[str, SEOIssue] = {}
     for idx, group in enumerate(groups):
@@ -712,6 +903,9 @@ def generate_site_summary(pages: list[PageTechnicalRecord]) -> SiteAuditSummary:
     generators: set[str] = set()
     analytics_found: set[str] = set()
     broken_links_set: set[str] = set()
+    broken_types: dict[str, str] = {}
+    page_type_counts: dict[str, int] = defaultdict(int)
+    location_status_counts: dict[str, int] = defaultdict(int)
     orphans = 0
     duplicate_pages = 0
     total_resp_time = 0
@@ -728,6 +922,16 @@ def generate_site_summary(pages: list[PageTechnicalRecord]) -> SiteAuditSummary:
         # Broken outlinks
         for bo in p.broken_outlinks:
             broken_links_set.add(bo)
+        for d in p.broken_outlink_details:
+            t = d.get("target_url", "")
+            err = d.get("error_type") or ""
+            st = d.get("target_status")
+            broken_types.setdefault(t, err if err else f"http_{st}")
+
+        if p.page_type:
+            page_type_counts[p.page_type] += 1
+        if p.location_status:
+            location_status_counts[p.location_status] += 1
 
         # Analytics
         a = p.analytics
@@ -796,4 +1000,15 @@ def generate_site_summary(pages: list[PageTechnicalRecord]) -> SiteAuditSummary:
         cms_generators_detected=sorted(list(generators)),
         analytics_detected=sorted(list(analytics_found)),
         issues_by_category=dict(sorted(issues_by_cat.items(), key=lambda x: -x[1])),
+        broken_targets_by_error_type=dict(sorted(_count_values(broken_types).items())),
+        timing_source="crawler",
+        page_type_counts=dict(sorted(page_type_counts.items())),
+        location_status_counts=dict(sorted(location_status_counts.items())),
     )
+
+
+def _count_values(mapping: dict[str, str]) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    for v in mapping.values():
+        counts[v] += 1
+    return dict(counts)

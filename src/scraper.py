@@ -19,6 +19,7 @@ from src.flaresolverr import FlareSolverrClient
 from src.output import OutputManager
 from src.seo_auditor import SEOAuditConfig, audit_page
 from src.sitemap import SitemapDiscovery, is_internal_url, normalize_url
+from src.transport import TRANSPORT_ERROR_TYPES, classify_transport_error  # noqa: F401 (re-exported)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -193,6 +194,11 @@ def _extract_cache_header(headers: httpx.Headers | dict[str, str]) -> str:
     return ""
 
 
+def _error_message(e: BaseException) -> str:
+    msg = str(e)
+    return msg if msg else type(e).__name__
+
+
 def fetch_with_redirect_inspection(
     client: httpx.Client,
     url: str,
@@ -217,9 +223,9 @@ def fetch_with_redirect_inspection(
             r = client.get(curr, follow_redirects=False, timeout=timeout)
         except Exception as e:
             if hop == 0:
-                return None, [], curr, 0, None, str(e), 0
+                return None, [], curr, 0, None, _error_message(e), 0
             else:
-                return first_resp, redirect_chain, curr, initial_status, None, str(e), ttfb_ms
+                return first_resp, redirect_chain, curr, initial_status, None, _error_message(e), ttfb_ms
 
         if hop == 0:
             initial_status = r.status_code
@@ -240,6 +246,38 @@ def fetch_with_redirect_inspection(
 
     target_status = last_resp.status_code if (last_resp and redirect_chain) else None
     return (last_resp, redirect_chain, curr, initial_status, target_status, None, ttfb_ms)
+
+
+def verify_link_targets(
+    urls: list[str],
+    client: httpx.Client | None = None,
+    timeout: float = 10.0,
+) -> tuple[dict[str, int], dict[str, str]]:
+    """Status-check link targets without parsing or queueing them.
+
+    Returns (status_map, error_map): the final HTTP status per URL (after following
+    redirects), and the transport error type for URLs that failed at any hop.
+    """
+    status_map: dict[str, int] = {}
+    error_map: dict[str, str] = {}
+    own_client = client is None
+    if client is None:
+        client = httpx.Client(timeout=timeout, follow_redirects=False, headers=dict(DEFAULT_HEADERS))
+    try:
+        for url in urls:
+            _resp, _chain, _dest, init_s, target_s, trans_err, _ttfb = fetch_with_redirect_inspection(
+                client, url, timeout=timeout
+            )
+            if trans_err:
+                error_map[url] = classify_transport_error(trans_err) or "other"
+                continue
+            status = int(target_s or init_s or 0)
+            if status > 0:
+                status_map[url] = status
+    finally:
+        if own_client:
+            client.close()
+    return status_map, error_map
 
 
 def execute_single_scrape(
@@ -430,6 +468,9 @@ def execute_single_scrape(
 
         # Definitive status codes: 200, 301, 302, 303, 307, 308, 404, 410 (never retried!)
         is_success = (status_code in (200, 301, 302, 303, 307, 308, 404, 410)) and not is_challenge
+
+        if transport_error:
+            page_rec.transport_error_type = classify_transport_error(transport_error)
 
         # Run per-page SEO issues check
         cfg = audit_cfg or SEOAuditConfig()

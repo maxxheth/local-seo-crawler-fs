@@ -3,10 +3,56 @@
 from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
+import sys
 from typing import Sequence
 
 from src import scraper
-from src.orchestrator import CrawlerOrchestrator
+from src.classifier import DEFAULT_PROTOTYPE_TOKENS, DEFAULT_STATUS_MARKERS, DEFAULT_UTILITY_TOKENS
+from src.seo_auditor import DEFAULT_STAGING_HOST_PATTERNS
+
+
+def _csv_list(value: str) -> tuple[str, ...]:
+    return tuple(v.strip() for v in value.split(",") if v.strip())
+
+
+def _load_status_markers(value: str) -> dict[str, tuple[str, ...]] | None:
+    """--status-markers accepts inline JSON or a JSON file path: {"status": ["phrase", ...]}.
+
+    Raises ValueError with a user-facing message on bad input.
+    """
+    if not value:
+        return None
+    stripped = value.strip()
+    if stripped.startswith("{"):
+        raw = stripped  # inline JSON; never treated as a path (long values exceed NAME_MAX)
+    else:
+        try:
+            path = Path(stripped)
+            if not path.is_file():
+                raise ValueError(f"--status-markers: '{value}' is neither inline JSON nor an existing file")
+            raw = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ValueError(f"--status-markers: cannot read '{value}': {exc}") from exc
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--status-markers: invalid JSON ({exc})") from exc
+    if not isinstance(data, dict):
+        raise ValueError('--status-markers: expected an object like {"temporarily_closed": ["..."]}')
+    unknown = sorted(set(data) - set(DEFAULT_STATUS_MARKERS))
+    if unknown:
+        raise ValueError(
+            f"--status-markers: unknown status {', '.join(unknown)}; expected one of "
+            f"{', '.join(sorted(DEFAULT_STATUS_MARKERS))}"
+        )
+    out: dict[str, tuple[str, ...]] = {}
+    for k, v in data.items():
+        if isinstance(v, str) or not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            raise ValueError(f"--status-markers: '{k}' must map to a list of phrases")
+        out[str(k)] = tuple(v)
+    return out
 
 
 def build_parser(defaults: dict[str, object]) -> argparse.ArgumentParser:
@@ -18,7 +64,7 @@ def build_parser(defaults: dict[str, object]) -> argparse.ArgumentParser:
         "--mode",
         type=str,
         default="citations",
-        help="Target mode: 'citations', 'competitor', 'serp' [default: citations]",
+        help="Mode: 'citations', 'competitor', 'serp', or 'report' (render a report from an existing --db) [default: citations]",
     )
     parser.add_argument(
         "--input",
@@ -260,6 +306,113 @@ def build_parser(defaults: dict[str, object]) -> argparse.ArgumentParser:
         default=int(defaults.get("large_err_bytes", 3145728)),
         help="HTML page size error threshold in bytes [default: 3145728]",
     )
+
+    # Post-crawl page classification (WS4/WS5)
+    parser.add_argument(
+        "--hub-min-links",
+        dest="hub_min_links",
+        type=int,
+        default=int(defaults.get("hub_min_links", 10)),
+        help="Minimum distinct body links to same-shape pages for a directory hub [default: 10]",
+    )
+    parser.add_argument(
+        "--directory-url",
+        dest="directory_urls",
+        action="append",
+        default=[],
+        help="Force a URL to be treated as a directory hub (repeatable)",
+    )
+    parser.add_argument(
+        "--locations-file",
+        dest="locations_file",
+        type=str,
+        default=str(defaults.get("locations_file", "")),
+        help="Authoritative CSV/JSON store list (url, name, address, phone, status); overrides detected clinics",
+    )
+    parser.add_argument(
+        "--status-markers",
+        dest="status_markers",
+        type=str,
+        default="",
+        help='Status phrases as JSON file or inline JSON, merged over defaults: {"temporarily_closed": ["..."]}',
+    )
+    parser.add_argument(
+        "--utility-tokens",
+        dest="utility_tokens",
+        type=_csv_list,
+        default=DEFAULT_UTILITY_TOKENS,
+        help="Comma-separated slug words marking utility pages [default: thank-you,thankyou,confirmation,...]",
+    )
+    parser.add_argument(
+        "--prototype-tokens",
+        dest="prototype_tokens",
+        type=_csv_list,
+        default=DEFAULT_PROTOTYPE_TOKENS,
+        help="Comma-separated whole slug words marking prototype/staging pages [default: demo,old,new,test,...]",
+    )
+    parser.add_argument(
+        "--prototype-allowlist",
+        dest="prototype_allowlist",
+        action="append",
+        default=[],
+        help="URL exempt from prototype detection (repeatable)",
+    )
+    parser.add_argument(
+        "--staging-host-patterns",
+        dest="staging_host_patterns",
+        type=_csv_list,
+        default=DEFAULT_STAGING_HOST_PATTERNS,
+        help="Comma-separated glob patterns for staging hosts [default: staging*,*.staging.*,*-staging.*,*.on-forge.com,dev.*]",
+    )
+    parser.add_argument(
+        "--corporate-share",
+        dest="corporate_share",
+        type=float,
+        default=float(defaults.get("corporate_share", 0.40)),
+        help="Share of pages above which a phone/address counts as corporate, not local [default: 0.40]",
+    )
+
+    # Performance (WS6)
+    parser.add_argument(
+        "--timing-sample",
+        dest="timing_sample",
+        type=int,
+        default=int(defaults.get("timing_sample", 0)),
+        help="After the crawl, fetch N URLs sequentially (cache-busted) and report TTFB median/p95 [default: 0 = off]",
+    )
+    parser.add_argument(
+        "--psi-api-key",
+        dest="psi_api_key",
+        type=str,
+        default=str(defaults.get("psi_api_key", "")),
+        help="PageSpeed Insights API key for Chrome UX Report field data",
+    )
+    parser.add_argument(
+        "--psi-sample",
+        dest="psi_sample",
+        type=int,
+        default=int(defaults.get("psi_sample", 0)),
+        help="Number of URLs to query in PageSpeed Insights (requires --psi-api-key) [default: 0]",
+    )
+
+    # Report mode (WS3)
+    parser.add_argument("--db", dest="db", type=str, default="", help="Crawl database for --mode report")
+    parser.add_argument(
+        "--output", dest="output", type=str, default="",
+        help="Report output path for --mode report [default: <db dir>/crawl_report.md]",
+    )
+    parser.add_argument(
+        "--format", dest="report_format", type=str, choices=["md", "json"], default="md",
+        help="Report format for --mode report; md also writes report_summary.json [default: md]",
+    )
+    parser.add_argument(
+        "--sample-size", dest="report_sample_size", type=int, default=10,
+        help="Sample URLs listed per report finding [default: 10]",
+    )
+    parser.add_argument(
+        "--verify-narrative", dest="verify_narrative", type=str, default="",
+        help="Check an externally written Markdown narrative against the report data; non-zero exit on mismatch",
+    )
     return parser
 
 
@@ -299,44 +452,83 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = build_parser(cfg)
     args = parser.parse_args(argv)
 
-    orchestrator = CrawlerOrchestrator(
-        mode=args.mode,
-        input_path=args.input_path,
-        domain=args.domain,
-        query=args.query,
-        location=args.location,
-        business_name=args.business_name,
-        concurrency=args.concurrency,
-        max_retries=args.max_retries,
-        output_dir=args.output_dir,
-        max_pages=args.max_pages,
-        max_depth=args.max_depth,
-        chunk_size=args.chunk_size,
-        flaresolverr_url=args.flaresolverr_url,
-        use_sitemap=args.use_sitemap,
-        fast_http_first=args.fast_http_first,
-        redis_url=args.redis_url,
-        sqlite_db_name=args.sqlite_db_name,
-        export_format=args.export_format,
-        export_mode=args.export_mode,
-        export_chunk_size=args.export_chunk_size,
-        archive_format=args.archive_format,
-        tar_compression=args.tar_compression,
-        enable_competitor=args.enable_competitor,
-        preserve_trailing_slash=args.preserve_trailing_slash,
-        verify_all_links=args.verify_all_links,
-        title_min_len=args.title_min_len,
-        title_max_len=args.title_max_len,
-        desc_min_len=args.desc_min_len,
-        desc_max_len=args.desc_max_len,
-        min_word_count=args.min_word_count,
-        dup_threshold=args.dup_threshold,
-        slow_warn_ms=args.slow_warn_ms,
-        slow_err_ms=args.slow_err_ms,
-        large_warn_bytes=args.large_warn_bytes,
-        large_err_bytes=args.large_err_bytes,
-    )
+    if args.mode == "report":
+        if not args.db:
+            parser.error("--mode report requires --db <crawl_results.db>")
+        from src.report import run_report
+
+        sys.exit(
+            run_report(
+                db=args.db,
+                output=args.output,
+                fmt=args.report_format,
+                sample_limit=args.report_sample_size,
+                verify_narrative_path=args.verify_narrative,
+            )
+        )
+
+    from src.orchestrator import CrawlerOrchestrator
+
+    try:
+        status_markers = _load_status_markers(args.status_markers)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    try:
+        orchestrator = CrawlerOrchestrator(
+            mode=args.mode,
+            input_path=args.input_path,
+            domain=args.domain,
+            query=args.query,
+            location=args.location,
+            business_name=args.business_name,
+            concurrency=args.concurrency,
+            max_retries=args.max_retries,
+            output_dir=args.output_dir,
+            max_pages=args.max_pages,
+            max_depth=args.max_depth,
+            chunk_size=args.chunk_size,
+            flaresolverr_url=args.flaresolverr_url,
+            use_sitemap=args.use_sitemap,
+            fast_http_first=args.fast_http_first,
+            redis_url=args.redis_url,
+            sqlite_db_name=args.sqlite_db_name,
+            export_format=args.export_format,
+            export_mode=args.export_mode,
+            export_chunk_size=args.export_chunk_size,
+            archive_format=args.archive_format,
+            tar_compression=args.tar_compression,
+            enable_competitor=args.enable_competitor,
+            preserve_trailing_slash=args.preserve_trailing_slash,
+            verify_all_links=args.verify_all_links,
+            title_min_len=args.title_min_len,
+            title_max_len=args.title_max_len,
+            desc_min_len=args.desc_min_len,
+            desc_max_len=args.desc_max_len,
+            min_word_count=args.min_word_count,
+            dup_threshold=args.dup_threshold,
+            slow_warn_ms=args.slow_warn_ms,
+            slow_err_ms=args.slow_err_ms,
+            large_warn_bytes=args.large_warn_bytes,
+            large_err_bytes=args.large_err_bytes,
+            hub_min_links=args.hub_min_links,
+            directory_urls=args.directory_urls,
+            locations_file=args.locations_file,
+            status_markers=status_markers,
+            utility_tokens=args.utility_tokens,
+            prototype_tokens=args.prototype_tokens,
+            prototype_allowlist=tuple(args.prototype_allowlist),
+            staging_host_patterns=args.staging_host_patterns,
+            corporate_share=args.corporate_share,
+            timing_sample=args.timing_sample,
+            psi_api_key=args.psi_api_key,
+            psi_sample=args.psi_sample,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        parser.error(str(exc))
     orchestrator.run()
+    if orchestrator.post_crawl_error:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from openpyxl.utils import get_column_letter
 
 import re
 
+from src.storage import is_broken_target
 from src.models import (
     CitationItem,
     EvidenceRecord,
@@ -214,11 +215,11 @@ def write_site_crawl_excel(
         ("Warnings", warnings, "Sub-optimal elements (title/meta lengths, thin content, missing H1/alt)"),
         ("Info / Notices", info, "Redirects, external canonical pointers, missing OG tags"),
         ("Near-Duplicate Content Pages", dup_pages, "Dice similarity >= threshold with near-identical copy"),
-        ("Broken Internal Links (4xx/5xx)", broken_links, "Links pointing to internal 404/5xx error targets"),
+        ("Broken Internal Link Targets", broken_links, "Internal targets returning 4xx/5xx or failing at transport level (TLS, DNS, timeout)"),
         ("Orphan Pages (0 Inlinks)", orphan_pages, "Pages not linked from any internal crawl page"),
-        ("Average Server Response Time", f"{avg_speed} ms", "Recommended: < 1,000 ms"),
-        ("Median Server Response Time", f"{median_speed} ms", "50th percentile response latency"),
-        ("p95 Server Response Time", f"{p95_speed} ms", "95th percentile tail latency"),
+        ("Average Crawl Response Time (crawler-measured)", f"{avg_speed} ms", "Reflects crawler concurrency and network path, not user experience"),
+        ("Median Crawl Response Time (crawler-measured)", f"{median_speed} ms", "50th percentile of crawler-measured fetch time"),
+        ("p95 Crawl Response Time (crawler-measured)", f"{p95_speed} ms", "95th percentile of crawler-measured fetch time"),
     ]
 
     for row_idx, (metric, val, note) in enumerate(kpis, start=5):
@@ -358,6 +359,9 @@ def write_site_crawl_excel(
         "Server Header",
         "Cache Status",
         "In Sitemap",
+        "Page Type",
+        "Location Status",
+        "Transport Error Type",
     ]
     for c_idx, h in enumerate(page_headers, start=1):
         ws_pages.cell(row=1, column=c_idx, value=h)
@@ -404,8 +408,47 @@ def write_site_crawl_excel(
         ws_pages.cell(row=r_idx, column=31, value=p.server_header)
         ws_pages.cell(row=r_idx, column=32, value=p.cache_status)
         ws_pages.cell(row=r_idx, column=33, value="Yes" if p.in_sitemap else "No")
+        ws_pages.cell(row=r_idx, column=34, value=p.page_type)
+        ws_pages.cell(row=r_idx, column=35, value=p.location_status)
+        ws_pages.cell(row=r_idx, column=36, value=p.transport_error_type)
 
     _apply_table_styling(ws_pages, start_row=1)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Sheet 2b: Page Types (post-crawl classification)
+    # ─────────────────────────────────────────────────────────────────────────
+    ws_types = wb.create_sheet(title="Page Types")
+    ws_types.views.sheetView[0].showGridLines = True
+    type_headers = [
+        "URL",
+        "Page Type",
+        "Confidence",
+        "Classification Reasons",
+        "Location Status",
+        "Moved To",
+        "Relocated",
+        "Status Evidence",
+        "HTTP Status",
+    ]
+    for c_idx, h in enumerate(type_headers, start=1):
+        ws_types.cell(row=1, column=c_idx, value=h)
+    type_order = {
+        "clinic_location": 0, "directory_hub": 1, "clinic_service": 2, "service_page": 3,
+        "utility_page": 4, "blog_post": 5, "blog_archive": 6, "other": 7, "": 8,
+    }
+    t_row = 2
+    for p in sorted(page_objs, key=lambda x: (type_order.get(x.page_type, 9), x.url)):
+        ws_types.cell(row=t_row, column=1, value=p.url)
+        ws_types.cell(row=t_row, column=2, value=p.page_type or "unclassified")
+        ws_types.cell(row=t_row, column=3, value=p.page_type_confidence)
+        ws_types.cell(row=t_row, column=4, value="; ".join(p.page_type_reasons))
+        ws_types.cell(row=t_row, column=5, value=p.location_status)
+        ws_types.cell(row=t_row, column=6, value=p.moved_to)
+        ws_types.cell(row=t_row, column=7, value="Yes" if p.relocated else "")
+        ws_types.cell(row=t_row, column=8, value="; ".join(f"{k}={v}" for k, v in sorted(p.status_evidence.items())))
+        ws_types.cell(row=t_row, column=9, value=p.status_code)
+        t_row += 1
+    _apply_table_styling(ws_types, start_row=1)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Sheet 3: SEO Issues
@@ -484,6 +527,9 @@ def write_site_crawl_excel(
         "DOM Placement",
         "Nofollow",
         "Target HTTP Status",
+        "Target Error Type",
+        "Malformed Relative Href",
+        "Intended Host",
     ]
     for c_idx, h in enumerate(links_headers, start=1):
         ws_links.cell(row=1, column=c_idx, value=h)
@@ -500,23 +546,37 @@ def write_site_crawl_excel(
             ws_links.cell(row=l_row, column=1, value=src)
             ws_links.cell(row=l_row, column=2, value=tgt)
             st = edge.get("target_status")
-            is_broken = st is not None and st >= 400
-            c_class = ws_links.cell(row=l_row, column=3, value="Broken Link" if is_broken else "Internal Link")
+            err_type = edge.get("target_error_type") or ""
+            is_broken = is_broken_target(st, err_type)
+            if is_broken:
+                link_class = "Broken Link"
+            elif edge.get("malformed_relative"):
+                link_class = "Malformed Relative Link"
+            elif st in (301, 302, 303, 307, 308):
+                link_class = "Link to Redirect"
+            else:
+                link_class = "Internal Link"
+            c_class = ws_links.cell(row=l_row, column=3, value=link_class)
             if is_broken:
                 _style_status_cell(c_class, "error")
 
             ws_links.cell(row=l_row, column=4, value=edge.get("anchor_text", ""))
             ws_links.cell(row=l_row, column=5, value=edge.get("placement", "body"))
             ws_links.cell(row=l_row, column=6, value="Yes" if edge.get("is_nofollow") else "No")
-            c_t_stat = ws_links.cell(row=l_row, column=7, value=st or "")
+            c_t_stat = ws_links.cell(row=l_row, column=7, value=st if st is not None else "")
             if is_broken:
-                _style_status_cell(c_t_stat, st)
+                _style_status_cell(c_t_stat, st if st else "error")
+            ws_links.cell(row=l_row, column=8, value=err_type)
+            ws_links.cell(row=l_row, column=9, value=edge.get("raw_href", "") if edge.get("malformed_relative") else "")
+            ws_links.cell(row=l_row, column=10, value=edge.get("intended_host", ""))
             l_row += 1
 
     # Also make sure broken outlinks from pages are included
     for p in page_objs:
+        detail_by_target = {d.get("target_url"): d for d in p.broken_outlink_details}
         for broken_url in p.broken_outlinks:
             if (p.url, broken_url) not in seen_links:
+                detail = detail_by_target.get(broken_url, {})
                 ws_links.cell(row=l_row, column=1, value=p.url)
                 ws_links.cell(row=l_row, column=2, value=broken_url)
                 c_class = ws_links.cell(row=l_row, column=3, value="Broken Link")
@@ -524,8 +584,9 @@ def write_site_crawl_excel(
                 ws_links.cell(row=l_row, column=4, value="—")
                 ws_links.cell(row=l_row, column=5, value="body")
                 ws_links.cell(row=l_row, column=6, value="No")
-                c_st = ws_links.cell(row=l_row, column=7, value=">= 400")
+                c_st = ws_links.cell(row=l_row, column=7, value=detail.get("target_status", ">= 400"))
                 _style_status_cell(c_st, "error")
+                ws_links.cell(row=l_row, column=8, value=detail.get("error_type", ""))
                 seen_links.add((p.url, broken_url))
                 l_row += 1
 

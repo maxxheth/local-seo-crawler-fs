@@ -89,6 +89,14 @@ class InternalLinkEdge(BaseModel):
     placement: str = "body"  # "navigation" | "header" | "footer" | "body" | "image"
     is_nofollow: bool = False
     target_status: int | None = None
+    # WS1: scheme-less hrefs that look like hostnames (e.g. href="www.youtube.com/x")
+    # resolve relative to the document base, exactly as browsers do. They are kept
+    # as internal edges but annotated so they can be reported as malformed.
+    malformed_relative: bool = False
+    intended_host: str = ""
+    raw_href: str = ""
+    # WS2: structured transport failure of the target (tls_hostname_mismatch, dns_failure, ...)
+    target_error_type: str = ""
 
 
 class SEOIssue(BaseModel):
@@ -108,6 +116,7 @@ class PageTechnicalRecord(BaseModel):
     redirect_target_status: int | None = None
     content_type: str = ""
     transport_error: str = ""
+    transport_error_type: str = ""
     fetch_method: str = "fast_http"
     ttfb_ms: int = 0
     server_header: str = ""
@@ -152,6 +161,21 @@ class PageTechnicalRecord(BaseModel):
     nofollow_outlinks_count: int = 0
     link_placements: dict[str, int] = Field(default_factory=dict)
     broken_outlinks: list[str] = Field(default_factory=list)
+    # [{"target_url", "target_status", "error_type"}] for each entry in broken_outlinks
+    broken_outlink_details: list[dict[str, Any]] = Field(default_factory=list)
+    external_link_hosts: list[str] = Field(default_factory=list)
+
+    # Opening section text (hero / first content block) used for status notices
+    opening_text: str = ""
+
+    # WS4: post-crawl classification
+    page_type: str = ""
+    page_type_confidence: float = 0.0
+    page_type_reasons: list[str] = Field(default_factory=list)
+    location_status: str = ""
+    moved_to: str = ""
+    relocated: bool = False
+    status_evidence: dict[str, str] = Field(default_factory=dict)
 
     # Automated SEO Issues
     issues: list[SEOIssue] = Field(default_factory=list)
@@ -174,6 +198,10 @@ class SiteAuditSummary(BaseModel):
     server_stack_detected: list[str] = Field(default_factory=list)
     caching_detected: list[str] = Field(default_factory=list)
     issues_by_category: dict[str, int] = Field(default_factory=dict)
+    broken_targets_by_error_type: dict[str, int] = Field(default_factory=dict)
+    timing_source: str = "crawler"
+    page_type_counts: dict[str, int] = Field(default_factory=dict)
+    location_status_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class SiteCrawlArtifact(BaseModel):

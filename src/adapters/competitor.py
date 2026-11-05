@@ -27,15 +27,49 @@ PHONE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_STREET_SUFFIXES = (
+    "Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Trail|Trl|Way|Court|Ct|Circle|Cir|"
+    "Pkwy|Parkway|Hwy|Highway|Place|Pl|Plaza|Plz|Square|Sq|Terrace|Ter|Loop|Pike|Row|Center|Ctr|"
+    "Crossing|Xing|Freeway|Fwy|Expressway|Expy|Turnpike|Tpke|Alley|Aly|Run|Path|Commons|Walk"
+)
+US_STATE_NAMES: dict[str, str] = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
+    "colorado": "CO", "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA",
+    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD", "massachusetts": "MA",
+    "michigan": "MI", "minnesota": "MN", "mississippi": "MS", "missouri": "MO", "montana": "MT",
+    "nebraska": "NE", "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM",
+    "new york": "NY", "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT", "vermont": "VT",
+    "virginia": "VA", "washington": "WA", "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "district of columbia": "DC",
+}
+_STATE_FULL = "|".join(sorted((n.replace(" ", r"\s+") for n in US_STATE_NAMES), key=len, reverse=True))
+
+# Street line, optional unit segments, then "City, ST 12345" (or "City, Utah 84057").
+# The separator between street/unit and city may be a comma or plain whitespace
+# ("3989 Boston Street Baltimore, MD 21224"). Utah-style grid addresses
+# ("560 W 800 N") are accepted via a trailing compass direction.
 ADDRESS_REGEX = re.compile(
-    r"(?<!-)\b\d{1,6}\s+(?:[NSEW]\.?\s+)?(?:[A-Za-z][A-Za-z0-9.\s,#&-]{1,45}?|\d{1,4}(?:st|nd|rd|th)\s+[A-Za-z0-9.\s,#&-]{0,35}?)\s+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Trail|Trl|Way|Court|Ct|Circle|Cir|Suite|Ste|Pkwy|Parkway|Hwy|Highway)\b[^\n,]*,\s*[A-Za-z\s]+,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?",
+    r"(?<![\w-])\d{1,6}[A-Za-z]?\s+"
+    r"(?:[A-Za-z0-9.#&'/-]+\s+){0,6}?"
+    rf"(?:(?:{_STREET_SUFFIXES})\b\.?|[NSEW]\b\.?)"
+    r"(?:[\s,]+(?:Suite|Ste\.?|Unit|Bldg\.?|Building|Apt\.?|Floor|Fl\.?|\#)\s*[A-Za-z0-9-]+|,\s*[A-Za-z]?-?\d+[A-Za-z]?\b)*"
+    r"(?:,\s*|\s+)"
+    r"(?:[A-Za-z][A-Za-z.'-]*\s+){0,3}?[A-Za-z][A-Za-z.'-]*"
+    rf",\s*(?:[A-Z]{{2}}|{_STATE_FULL})\.?,?\s+\d{{5}}(?:-\d{{4}})?\b",
     re.IGNORECASE,
 )
 
+# Scheme-less href whose first segment looks like a hostname ("www.youtube.com/...",
+# "example.com/path"). Used ONLY to annotate links: resolution always follows RFC 3986.
 BARE_DOMAIN_PATTERN = re.compile(
-    r"^(?:www\.[a-zA-Z0-9.-]+|[a-zA-Z0-9-]+\.(?:com|org|net|edu|gov|io|co|us|biz|info|tv|me)(?:[/:?#]|$))",
+    r"^(?P<host>www\d?\.[a-z0-9-]+(?:\.[a-z0-9-]+)+|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|edu|gov|io|co|us|biz|info|tv|me|ly|app|dev|uk|ca|au|de))(?=[/:?#]|$)",
     re.IGNORECASE,
 )
+
+OPENING_TEXT_MAX_CHARS = 1500
 
 GA4_PATTERN = re.compile(r"G-[A-Z0-9]{10}")
 GTM_PATTERN = re.compile(r"GTM-[A-Z0-9]+")
@@ -72,6 +106,25 @@ def _classify_link_placement(node: Any) -> str:
         curr = curr.parent
 
     return "body"
+
+
+def detect_malformed_relative(href: str) -> str:
+    """Return the intended host when a scheme-less href looks like a bare domain, else ''."""
+    if not href or "://" in href or href.startswith(("/", ".", "?", "#")):
+        return ""
+    if ":" in href.split("/", 1)[0] and not re.match(r"^[^:/]+:\d+(?:/|$)", href):
+        # Has a scheme such as mailto:, tel:, javascript:
+        return ""
+    m = BARE_DOMAIN_PATTERN.match(href)
+    return m.group("host").lower() if m else ""
+
+
+def _main_content_node(tree: Any) -> Any:
+    for sel in ("main", "[role='main']", "#main", "#content", "article"):
+        node = tree.css_first(sel)
+        if node is not None:
+            return node
+    return None
 
 
 def _extract_analytics(html: str) -> AnalyticsAndTracking:
@@ -405,6 +458,16 @@ class CompetitorSiteAdapter:
         link_edges: list[InternalLinkEdge] = []
         seen_hrefs: set[str] = set()
         placements: dict[str, int] = defaultdict(int)
+        external_hosts: set[str] = set()
+
+        # RFC 3986 document base: <base href> (resolved against the final URL), else the
+        # final URL after redirects, keeping its trailing slash.
+        document_base = effective_final_url
+        base_node = tree.css_first("base[href]")
+        if base_node is not None:
+            base_href = (base_node.attributes.get("href") or "").strip()
+            if base_href:
+                document_base = urljoin(effective_final_url, base_href)
 
         for a_tag in tree.css("a[href]"):
             href = a_tag.attributes.get("href", "").strip()
@@ -416,14 +479,11 @@ class CompetitorSiteAdapter:
             if is_nofollow:
                 nofollow_count += 1
 
-            if BARE_DOMAIN_PATTERN.match(href) and not href.startswith(("/", "#", "?", "./", "../")):
-                candidate_url = f"https://{href}"
-            else:
-                candidate_url = href
+            intended_host = detect_malformed_relative(href)
 
             normalized_link = normalize_url(
-                candidate_url,
-                base_url=url,
+                href,
+                base_url=document_base,
                 preserve_trailing_slash=preserve_trailing_slash,
             )
             if not normalized_link:
@@ -441,14 +501,24 @@ class CompetitorSiteAdapter:
                     anchor_text=anchor[:100],
                     placement=placement,
                     is_nofollow=is_nofollow,
+                    malformed_relative=bool(intended_host),
+                    intended_host=intended_host,
+                    raw_href=href[:500],
                 )
                 link_edges.append(edge)
 
-                if normalized_link not in seen_hrefs:
+                # Malformed relative links are recorded as edges but never queued: on sites
+                # that answer unknown paths with 200, each fetched copy would emit a longer
+                # path (/a/www.x.com/www.x.com/...), a crawl trap. Their targets are
+                # status-checked once after the crawl instead.
+                if not intended_host and normalized_link not in seen_hrefs:
                     seen_hrefs.add(normalized_link)
                     discovered_internal.append(normalized_link)
             else:
                 external_count += 1
+                ext_host = urlparse(normalized_link).netloc.lower()
+                if ext_host:
+                    external_hosts.add(ext_host)
 
         # 6. NAP & Maps extraction (inspect elements before DOM cleaning)
         found_phones: set[str] = set()
@@ -492,16 +562,10 @@ class CompetitorSiteAdapter:
                     found_map_coords.add(f"{m_q.group(1)},{m_q.group(2)}")
 
         for addr_tag in tree.css("address, .address, [class*='address'], [itemprop='address']"):
-            txt = " ".join(addr_tag.text().split()).strip()
+            txt = " ".join(addr_tag.text(separator=" ").split()).strip()
+            txt = re.sub(r"\s+([,.])", r"\1", txt)
             if txt and len(txt) < 250 and any(ch.isdigit() for ch in txt):
                 found_addresses.add(txt)
-
-        footer = tree.css_first("footer")
-        if footer:
-            for addr_tag in footer.css("address, .address, [class*='address'], [itemprop='address']"):
-                txt = " ".join(addr_tag.text().split()).strip()
-                if txt and len(txt) < 250 and any(ch.isdigit() for ch in txt):
-                    found_addresses.add(txt)
 
         # 7. Visible body text & token analysis
         body = tree.css_first("body")
@@ -537,6 +601,17 @@ class CompetitorSiteAdapter:
         # 8. Analytics & Local Marketing Stack Detection
         analytics_info = _extract_analytics(html)
 
+        # 9. Opening section text (hero / first content block) for status notices.
+        # Done last because it removes site chrome from the tree.
+        main_node = _main_content_node(tree)
+        if main_node is None and body is not None:
+            for chrome in body.css("header, nav, footer"):
+                chrome.decompose()
+            main_node = body
+        opening_text = ""
+        if main_node is not None:
+            opening_text = " ".join(main_node.text(separator=" ").split())[:OPENING_TEXT_MAX_CHARS]
+
         record = PageTechnicalRecord(
             url=url,
             final_url=effective_final_url,
@@ -568,7 +643,7 @@ class CompetitorSiteAdapter:
             schema_jsonld=schema_jsonld,
             nap_found=FoundNAP(
                 phones=sorted(list(found_phones))[:10],
-                addresses=sorted(list(found_addresses))[:5],
+                addresses=sorted(list(found_addresses))[:10],
                 tel_links=sorted(list(found_tel_links))[:10],
                 map_links=sorted(list(found_map_links))[:5],
                 map_embed_coords=sorted(list(found_map_coords))[:5],
@@ -588,6 +663,8 @@ class CompetitorSiteAdapter:
             analytics=analytics_info,
             nofollow_outlinks_count=nofollow_count,
             link_placements=dict(placements),
+            external_link_hosts=sorted(external_hosts)[:50],
+            opening_text=opening_text,
         )
 
         evidence = [

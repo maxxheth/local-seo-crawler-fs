@@ -11,10 +11,12 @@ import httpx
 
 from src import scraper
 from src.config import extract_proxy_port
-from src.models import PageTechnicalRecord
 from src.output import OutputManager
 from src.queue import FrontierQueue, create_frontier_queue
-from src.seo_auditor import SEOAuditConfig, detect_duplicate_pages
+from src.classifier import DEFAULT_PROTOTYPE_TOKENS, DEFAULT_UTILITY_TOKENS, ClassifierConfig, load_locations_file
+from src.performance import fetch_psi_field_data, run_timing_sample, select_sample_urls
+from src.post_crawl import run_post_crawl_stage
+from src.seo_auditor import DEFAULT_STAGING_HOST_PATTERNS, SEOAuditConfig
 from src.session_pool import SessionPool
 from src.sitemap import is_internal_url
 from src.storage import SQLiteStorage
@@ -195,6 +197,20 @@ class CrawlerOrchestrator:
         slow_err_ms: int = 3000,
         large_warn_bytes: int = 1048576,
         large_err_bytes: int = 3145728,
+        # Post-crawl classification (WS4/WS5)
+        hub_min_links: int = 10,
+        directory_urls: list[str] | None = None,
+        locations_file: str = "",
+        status_markers: dict[str, tuple[str, ...]] | None = None,
+        utility_tokens: tuple[str, ...] = DEFAULT_UTILITY_TOKENS,
+        prototype_tokens: tuple[str, ...] = DEFAULT_PROTOTYPE_TOKENS,
+        prototype_allowlist: tuple[str, ...] = (),
+        staging_host_patterns: tuple[str, ...] = DEFAULT_STAGING_HOST_PATTERNS,
+        corporate_share: float = 0.40,
+        # Performance (WS6)
+        timing_sample: int = 0,
+        psi_api_key: str = "",
+        psi_sample: int = 0,
     ) -> None:
         self.mode = mode
         self.input_path = input_path
@@ -235,7 +251,28 @@ class CrawlerOrchestrator:
             slow_err_ms=slow_err_ms,
             large_warn_bytes=large_warn_bytes,
             large_err_bytes=large_err_bytes,
+            prototype_tokens=tuple(prototype_tokens),
+            prototype_allowlist=tuple(prototype_allowlist),
+            staging_host_patterns=tuple(staging_host_patterns),
+            corporate_share=corporate_share,
         )
+        self.classifier_cfg = ClassifierConfig(
+            utility_tokens=tuple(utility_tokens),
+            hub_min_links=hub_min_links,
+            directory_urls=tuple(directory_urls or ()),
+            locations_file=locations_file,
+        )
+        if status_markers:
+            merged = dict(self.classifier_cfg.status_markers)
+            merged.update({k: tuple(v) for k, v in status_markers.items()})
+            self.classifier_cfg.status_markers = merged
+        self.timing_sample = timing_sample
+        self.psi_api_key = psi_api_key
+        self.psi_sample = psi_sample
+        self.post_crawl_error = ""
+        if locations_file:
+            # Validate up front so a bad path fails before the crawl, not after it
+            load_locations_file(locations_file)
 
         self.pool = SessionPool(flaresolverr_url)
         db_path = Path(output_dir) / sqlite_db_name
@@ -471,29 +508,51 @@ class CrawlerOrchestrator:
             # Backfill link statuses from already-crawled pages first so we only verify truly unvisited links
             self.storage.backfill_link_statuses_from_pages()
 
-            # If verify_all_links enabled, inspect any remaining unvisited link targets
-            if self.verify_all_links:
-                unvisited = self.storage.get_unvisited_link_targets()
-                if unvisited:
-                    print(f"Verifying {len(unvisited)} unvisited link targets (--verify-all-links)...")
-                    status_map: dict[str, int] = {}
-                    with httpx.Client(timeout=10.0, follow_redirects=False, headers=dict(scraper.DEFAULT_HEADERS)) as v_client:
-                        for u_target in unvisited:
-                            v_res = scraper.fetch_with_redirect_inspection(v_client, u_target, timeout=10.0)
-                            v_status = int(v_res.get("redirect_target_status") or v_res.get("status_code") or 0)
-                            if v_status > 0:
-                                status_map[u_target] = v_status
-                    self.storage.update_link_target_statuses(status_map)
+            # Status-check targets that were never crawled: malformed relative links always
+            # (they are not queued, to avoid crawl traps), everything else with --verify-all-links.
+            unvisited = self.storage.get_unvisited_link_targets(malformed_only=not self.verify_all_links)
+            if unvisited:
+                label = "unvisited link targets (--verify-all-links)" if self.verify_all_links else "malformed relative link targets"
+                print(f"Verifying {len(unvisited)} {label}...")
+                status_map, error_map = scraper.verify_link_targets(unvisited)
+                self.storage.update_link_target_statuses(status_map, error_map)
 
-            print("Analyzing site link graph and checking for near-duplicate pages...")
-            raw_pages = self.storage.fetch_all_pages()
-            page_objs = [PageTechnicalRecord(**p) for p in raw_pages]
-            duplicate_issues = detect_duplicate_pages(
-                page_objs,
-                threshold=self.audit_cfg.dup_threshold,
-            )
-            # Backfill target status, inlinks count, broken outlinks, and duplicate issues in SQLite
-            self.storage.post_crawl_sync(duplicate_issues)
+            timing = None
+            if self.timing_sample > 0 or (self.psi_api_key and self.psi_sample > 0):
+                all_pages = self.storage.fetch_all_pages()
+                all_links = self.storage.fetch_all_internal_links()
+                if self.timing_sample > 0:
+                    sample_urls = select_sample_urls(all_pages, all_links, self.timing_sample)
+                    print(f"Sequential timing sample of {len(sample_urls)} URLs (--timing-sample)...")
+                    timing = run_timing_sample(sample_urls, headers=dict(scraper.DEFAULT_HEADERS))
+                    self.storage.set_meta("timing_sample", timing)
+                if self.psi_api_key and self.psi_sample > 0:
+                    psi_urls = select_sample_urls(all_pages, all_links, self.psi_sample)
+                    print(f"Fetching PageSpeed Insights field data for {len(psi_urls)} URLs...")
+                    self.storage.set_meta("psi", fetch_psi_field_data(self.psi_api_key, psi_urls))
+
+            if self.domain:
+                self.storage.set_meta("domain", self.domain)
+            print("Classifying pages, auditing site context, and checking for near-duplicate pages...")
+            try:
+                stage = run_post_crawl_stage(
+                    self.storage,
+                    audit_cfg=self.audit_cfg,
+                    classifier_cfg=self.classifier_cfg,
+                    timing_sample=timing,
+                )
+                print("Page types:", stage["page_types"])
+                if stage["clinic_detection"] == "none":
+                    print(
+                        "WARNING: no clinic location pages detected, so LocalBusiness checks did not run. "
+                        "Use --directory-url or --locations-file if the site has locations."
+                    )
+            except Exception as exc:
+                # Never lose the crawl: fall back to link-graph sync and still export.
+                logger.exception("Post-crawl analysis failed; exporting with link-graph sync only")
+                self.post_crawl_error = f"{type(exc).__name__}: {exc}"
+                print(f"ERROR: post-crawl analysis failed ({self.post_crawl_error}); exporting without classification.")
+                self.storage.post_crawl_sync()
 
         # Export final artifacts from SQLite storage
         meta: dict[str, Any] = {
