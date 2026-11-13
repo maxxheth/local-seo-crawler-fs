@@ -39,9 +39,12 @@ DEFAULT_HEADERS = {
 }
 
 
-def init_scraper(config_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+def init_scraper(
+    config_overrides: dict[str, Any] | None = None,
+    env_file: str | Path | None = None,
+) -> dict[str, Any]:
     """Initialize scraper configuration from .env and environment."""
-    cfg = load_config()
+    cfg = load_config(env_file=env_file)
     if config_overrides:
         cfg.update(config_overrides)
     return cfg

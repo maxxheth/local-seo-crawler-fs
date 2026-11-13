@@ -402,6 +402,20 @@ def build_parser(defaults: dict[str, object]) -> argparse.ArgumentParser:
         default="",
         help="netrc file with HTTP Basic Auth credentials (e.g. a staging site). Sent only to hosts named as a machine in the file [default: off]",
     )
+    parser.add_argument(
+        "--env-file",
+        dest="env_file",
+        type=str,
+        default="",
+        help="Optional site-specific .env file to load before parsing options",
+    )
+    parser.add_argument(
+        "--google-profile",
+        dest="google_auth_profile",
+        type=str,
+        default=str(defaults.get("google_auth_profile", "")),
+        help="Named Google API auth profile [default: GOOGLE_AUTH_PROFILE from .env]",
+    )
 
     # Report mode (WS3)
     parser.add_argument("--db", dest="db", type=str, default="", help="Crawl database for --mode report")
@@ -425,10 +439,20 @@ def build_parser(defaults: dict[str, object]) -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    try:
-        cfg = scraper.init_scraper()
-    except Exception:
-        cfg = {
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--env-file", dest="env_file", type=str, default="")
+    pre_args, _ = pre.parse_known_args(argv)
+
+    if pre_args.env_file:
+        try:
+            cfg = scraper.init_scraper(env_file=pre_args.env_file)
+        except (FileNotFoundError, ValueError) as exc:
+            build_parser({}).error(str(exc))
+    else:
+        try:
+            cfg = scraper.init_scraper()
+        except Exception:
+            cfg = {
             "concurrency": 4,
             "max_retries": 3,
             "max_pages": 1000,

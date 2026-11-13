@@ -17,10 +17,14 @@ dependencies = [
     "zstandard>=0.23.0",
     "pytest>=8.0.0",
     "openpyxl>=3.1.5",
+    "google-auth>=2.35.0",
+    "google-auth-oauthlib>=1.2.0",
+    "requests>=2.32.0",
 ]
 
 [project.scripts]
 local-seo-crawler = "src.main:main"
+crawler-google-auth = "src.google_auth:main"
 
 [build-system]
 requires = ["hatchling"]

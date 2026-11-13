@@ -16,11 +16,16 @@ def _parse_bool(val: str | None, default: bool = True) -> bool:
     return val.strip().lower() in ("1", "true", "yes", "on")
 
 
-def load_config() -> dict[str, Any]:
+def load_config(env_file: str | Path | None = None) -> dict[str, Any]:
     """Load configuration from .env file and environment variables."""
     project_root = Path(__file__).resolve().parent.parent
     env_path = project_root / ".env"
-    if env_path.exists():
+    if env_file is not None and str(env_file).strip() != "":
+        custom_env = Path(env_file).expanduser()
+        if not custom_env.is_file():
+            raise FileNotFoundError(f"--env-file: '{env_file}' is not an existing file")
+        load_dotenv(custom_env, override=True)
+    elif env_path.exists():
         load_dotenv(env_path)
     else:
         load_dotenv()
@@ -76,6 +81,18 @@ def load_config() -> dict[str, Any]:
     psi_api_key = os.getenv("PSI_API_KEY", "").strip()
     psi_sample = int(os.getenv("PSI_SAMPLE", "0"))
 
+    # Google API Integration (multi-profile)
+    google_auth_profile = os.getenv("GOOGLE_AUTH_PROFILE", "").strip()
+    google_profiles_dir = os.getenv("GOOGLE_PROFILES_DIR", "").strip()
+    google_ga4_property_id = os.getenv("GOOGLE_GA4_PROPERTY_ID", "").strip()
+    google_gsc_site_url = os.getenv("GOOGLE_GSC_SITE_URL", "").strip()
+    google_gbp_account_id = os.getenv("GOOGLE_GBP_ACCOUNT_ID", "").strip()
+    google_gbp_location_ids = tuple(
+        x.strip() for x in os.getenv("GOOGLE_GBP_LOCATION_IDS", "").split(",") if x.strip()
+    )
+    lookback_raw = os.getenv("GOOGLE_LOOKBACK_DAYS", "").strip()
+    google_lookback_days = int(lookback_raw) if lookback_raw else 28
+
     return {
         "project_root": str(project_root),
         "flaresolverr_url": flaresolverr_url,
@@ -117,6 +134,13 @@ def load_config() -> dict[str, Any]:
         "timing_sample": timing_sample,
         "psi_api_key": psi_api_key,
         "psi_sample": psi_sample,
+        "google_auth_profile": google_auth_profile,
+        "google_profiles_dir": google_profiles_dir,
+        "google_ga4_property_id": google_ga4_property_id,
+        "google_gsc_site_url": google_gsc_site_url,
+        "google_gbp_account_id": google_gbp_account_id,
+        "google_gbp_location_ids": google_gbp_location_ids,
+        "google_lookback_days": google_lookback_days,
     }
 
 

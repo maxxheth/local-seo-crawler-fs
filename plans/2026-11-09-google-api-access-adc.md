@@ -1,103 +1,102 @@
-# Plan: Google API access for the local SEO crawler (workstation, keyless)
+# Plan: Multi-Profile Google API Access for `local-seo-crawler-fs`
 
-**Date:** 2026-11-09
-**Status:** Plan only. Nothing has been configured yet.
-**Runs from:** local workstation (not AWS)
-**APIs:** Google Analytics (GA4 Data API), Google Search Console API, Google Business Profile APIs
+**Date:** 2026-11-13 *(updated from 2026-11-09)*
+**Status:** Implemented (2026-11-13) — Multi-Profile OAuth & `.env` Configuration
+**Runs from:** local workstation (multi-site Local SEO audits)
+**APIs:** Google Analytics 4 (`analyticsdata.googleapis.com`), Google Search Console (`webmasters/v3`), Google Business Profile (`mybusinessaccountmanagement`, `mybusinessbusinessinformation`, `businessprofileperformance`), plus optional Tag Manager verification (`tagmanager.googleapis.com`).
 
-## Why this approach
+## Why This Architecture Replaced `gcloud` ADC
 
-The marvenio.com Google Cloud org enforces `iam.disableServiceAccountKeyCreation`, so we can't
-download service account JSON keys. Workload Identity Federation (WIF) isn't needed either. WIF is for
-workloads that have no Google identity of their own. On a workstation, the crawler can use a person's
-own Google sign-in through **Application Default Credentials (ADC)**. No service account key gets
-created or stored.
+1. **Multi-Site Isolation (`profiles.yaml` + `.env`):** `local-seo-crawler-fs` audits multiple independent sites and Google organizations (e.g. Groundhogs TX, Face to Face Spa, Marvenio). A single workstation ADC file cannot cleanly isolate client credentials across brands, so profiles live in `~/.config/local-seo-crawler/google/` (`0700` dir, `0600` manifests/tokens) and are selected per run via `.env` (`GOOGLE_AUTH_PROFILE`, `GOOGLE_GA4_PROPERTY_ID`, `GOOGLE_GSC_SITE_URL`, `GOOGLE_GBP_ACCOUNT_ID`) or `--env-file` / `--google-profile`.
+2. **`gcloud auth application-default login` Scope Trap:** `gcloud` (SDK 593.0.0) rejects custom `--scopes` unless `https://www.googleapis.com/auth/cloud-platform` is included. Shared/restricted OAuth clients without `cloud-platform` fail under `gcloud`, so `crawler-google-auth` uses `google_auth_oauthlib.flow.InstalledAppFlow` over loopback `http://localhost` with each profile's exact scope list.
+3. **`gcloud auth application-default revoke` Cross-Client Hazard:** `gcloud ... revoke` calls Google's remote `https://oauth2.googleapis.com/revoke` endpoint, which in shared GCP projects (such as `macro-anchor-513817-n3`) can invalidate tokens issued to other OAuth clients in the same project. `crawler-google-auth logout` zero-overwrites, fsyncs, and unlinks only the target profile's local `token.json` by default (`remote_revoke_allowed: false`).
+4. **Decoupling from Marvenio Persistent Platform Auth:** Marvenio's persistent server-to-server broker (`https://google-connect.marvenio.com` in AWS account `030796672277`, `aws-nexus` `scripts/google_reporting_broker/signed_canary.py`) is tracked separately from this standalone workstation crawler.
 
-## Verified state (read-only checks, 2026-11-09)
+## Profile Store Layout (`~/.config/local-seo-crawler/google/`)
 
-| Item | Finding |
-|---|---|
-| Google Cloud org | `marvenio.com`, org ID `700750643344` |
-| admin@marvenio.com org role | Organization Administrator |
-| admin@marvenio.com project role | Owner on `marvenio-workspace-admin` |
-| Service account key creation | Blocked (`iam.disableServiceAccountKeyCreation` active) |
-| Service account creation | Allowed (`iam.managed.disableServiceAccountCreation` inactive) |
-| Domain restricted sharing | Active, scoped to the Workspace customer ID |
-
-Not checked yet: access levels in GA4, Search Console and Business Profile.
-
-## Steps (about 6, plus a separate Business Profile track)
-
-### 1. Choose the project and enable APIs
-- [ ] Pick a project. Option: create a dedicated one, e.g. `edfx-seo-crawler`, instead of reusing
-      `marvenio-workspace-admin`.
-- [ ] Enable `analyticsdata.googleapis.com` (GA4 Data API)
-- [ ] Enable `searchconsole.googleapis.com` (Search Console API)
-- [ ] Optional: enable `analyticsadmin.googleapis.com` if the crawler lists accounts or properties
-
-### 2. Configure the OAuth consent screen (Google Auth Platform)
-- [ ] Audience: **Internal**, if everyone who signs in uses a marvenio.com account. That avoids Google
-      app verification.
-- [ ] If set to External, publish to **Production**. Apps left in Testing get refresh tokens that
-      expire after 7 days.
-
-### 3. Create an OAuth client
-- [ ] Application type: **Desktop app**
-- [ ] Download the client JSON and keep it outside the repo, e.g. `~/.config/edfx/oauth-client.json`
-- This step is required because Google blocks the Analytics and Search Console scopes on gcloud's
-  built-in OAuth client ("This app is blocked").
-
-### 4. Sign in once on the workstation
-```bash
-gcloud auth application-default login \
-  --client-id-file="$HOME/.config/edfx/oauth-client.json" \
-  --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/analytics.readonly,https://www.googleapis.com/auth/webmasters.readonly
-```
-- [ ] Sign in with an account that already has read access to the target GA4 and Search Console properties.
-- The resulting file is `~/.config/gcloud/application_default_credentials.json`. It holds a refresh
-  token, so treat it as a secret and never commit it.
-
-### 5. Set the quota project
-```bash
-gcloud auth application-default set-quota-project <PROJECT_ID>
+```text
+~/.config/local-seo-crawler/google/      (0700)
+├── profiles.yaml                        (0600, non-secret profile metadata & scope pins)
+├── groundhogs/
+│   ├── client.json                      (0600, Desktop OAuth client JSON)
+│   └── token.json                       (0600, offline authorized_user refresh credential)
+└── marvenio/
+    └── token.json                       (0600; client_secrets_file points to ~/.config/marvenio/google/max-local-reporting-oauth-client.json)
 ```
 
-### 6. Wire up the crawler and test
-- [ ] Load credentials with `google.auth.default(scopes=[...])` (Python). The GA4 and Search Console
-      client libraries pick up ADC automatically.
-- [ ] Don't set `GOOGLE_APPLICATION_CREDENTIALS` unless the ADC file lives somewhere non-default.
-      If you do set it, use an absolute path.
-- [ ] Add any new env vars (property IDs, site URLs) to `.env.example` only, never to committed config.
-- [ ] Smoke test with one read-only call per API: a 1-day GA4 report, and a Search Console
-      `sites.list`.
+- Personal `~/.config/gcloud/application_default_credentials.json` is never read or modified.
+- `GOOGLE_PROFILES_DIR` can override `~/.config/local-seo-crawler/google` per `.env` if needed.
 
-## Google Business Profile: separate track (start early)
+## `.env` Per-Site Variables
 
-- The Business Profile APIs aren't open by default. Submit **"Application for Basic API Access"**
-  (https://support.google.com/business/contact/api_default) with the chosen project's **number**.
-  Approval is per project and can take days to weeks. Quota shows 0 QPM until approved.
-- [ ] Submit the access request for the same project as step 1
-- [ ] After approval, enable the Business Profile APIs (Account Management, Business Information,
-      Performance, and Google My Business v4.9 for reviews and posts)
-- [ ] Repeat step 4 with `https://www.googleapis.com/auth/business.manage` added to `--scopes`
-- [ ] The signing-in account must be an owner or manager on the Business Profiles
+See `.env.example`:
 
-## Privileges needed
+```dotenv
+GOOGLE_AUTH_PROFILE=
+GOOGLE_PROFILES_DIR=
+GOOGLE_GA4_PROPERTY_ID=
+GOOGLE_GSC_SITE_URL=
+GOOGLE_GBP_ACCOUNT_ID=
+GOOGLE_GBP_LOCATION_IDS=
+GOOGLE_LOOKBACK_DAYS=28
+```
 
-- **Steps 1–3:** project Owner. admin@marvenio.com already has this, and marvenio.com users can create
-  projects.
-- **Step 4 account:** read access is enough. Any user level on GA4 and Search Console, plus
-  owner or manager on Business Profiles.
+Pass `--env-file /path/to/.env.site` to either `crawler-google-auth` or `local-seo-crawler` to switch sites cleanly without editing the root `.env`.
 
-## Alternative for a shared team setup
+## CLI Workflow (`crawler-google-auth`)
 
-Each person's ADC impersonates a shared service account that has no key:
-`gcloud auth application-default login --impersonate-service-account=<SA_EMAIL> --scopes=...`
-- Pros: access belongs to the service account, not to individuals.
-- Cons: the service account must be added as a user in GA4 (needs Admin there) and in Search Console
-  (needs Owner there). It doesn't work for Business Profile.
+### 1. Register a Profile
+```bash
+# Generic site profile (GA4 + Search Console + Business Profile)
+uv run crawler-google-auth profile add groundhogs \
+  --client-file ~/.config/edfx/groundhogs-oauth-client.json \
+  --copy-client
 
-## Open decisions
-- [ ] Dedicated project vs. `marvenio-workspace-admin`
-- [ ] Which Google account signs in (admin@marvenio.com or a personal work account)
-- [ ] Solo ADC vs. shared impersonation
+# Marvenio preset (pins project macro-anchor-513817-n3, Desktop client ID, admin@marvenio.com, exact 7 scopes)
+uv run crawler-google-auth profile add marvenio \
+  --client-file ~/.config/marvenio/google/max-local-reporting-oauth-client.json \
+  --preset marvenio
+```
+
+### 2. List & Check Status
+```bash
+uv run crawler-google-auth profile list
+uv run crawler-google-auth status --profile marvenio
+uv run crawler-google-auth status --env-file .env.facetofacespa --live
+```
+
+### 3. Sign In (Browser Loopback OAuth)
+```bash
+uv run crawler-google-auth login --profile marvenio
+# Or via site .env:
+uv run crawler-google-auth login --env-file .env.groundhogs
+```
+- Verifies granted scopes and OIDC `userinfo` (`email_verified=true` plus any pinned `expected_email` / `expected_hd`) **before** saving `0600` `token.json`.
+
+### 4. Bounded Read-Only Verification (`verify`)
+```bash
+# Face to Face Spa via Marvenio profile
+uv run crawler-google-auth verify --profile marvenio \
+  --ga4-property 562840962 \
+  --gsc-site sc-domain:facetofacespa.com \
+  --gbp-account auto \
+  --json
+
+# Marvenio site via Marvenio profile (or values from .env)
+uv run crawler-google-auth verify --profile marvenio \
+  --ga4-property 557343330 \
+  --gsc-site sc-domain:marvenio.com \
+  --json
+```
+- `GoogleSignalsClient` enforces strictly read-only endpoints/methods, omits `X-Goog-User-Project` (so `cloud-platform` scope is not required), scrubs Bearer/token strings from errors, and classifies GBP `HTTP 429 RESOURCE_EXHAUSTED` as `GBP_QUOTA_ZERO_QPM`.
+
+### 5. Local Credential Removal (`logout`)
+```bash
+uv run crawler-google-auth logout --profile marvenio
+```
+- Overwrites `<profile>/token.json` with zero bytes, fsyncs, and unlinks locally without calling Google's remote `/revoke` endpoint.
+
+## Google Business Profile Note
+
+- Each owning GCP project still requires Google's **Basic API Access** approval (`0 QPM` -> `HTTP 429 RESOURCE_EXHAUSTED` until approved).
+- If you also run Marvenio's internal AWS reporting broker checks (`aws-nexus` PR 70), keep that workflow separate via `aws sso login --profile marvenio-internal-admin` and `scripts/google_reporting_broker/signed_canary.py`.
