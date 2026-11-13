@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from src import scraper
+from src.auth import load_netrc_auth
 from src.config import extract_proxy_port
 from src.output import OutputManager
 from src.queue import FrontierQueue, create_frontier_queue
@@ -35,6 +36,7 @@ def _process_chunk_worker(
     fast_http_first: bool,
     max_retries: int,
     audit_cfg: SEOAuditConfig | None = None,
+    auth: httpx.Auth | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int, str]:
     """Worker function executing a chunk of URLs using a persistent HTTP client and FlareSolverr session."""
     completed_results: list[dict[str, Any]] = []
@@ -49,6 +51,7 @@ def _process_chunk_worker(
         "timeout": 15.0,
         "follow_redirects": True,
         "headers": dict(scraper.DEFAULT_HEADERS),
+        "auth": auth,
     }
     if proxy_url:
         client_kwargs["proxy"] = proxy_url
@@ -211,6 +214,7 @@ class CrawlerOrchestrator:
         timing_sample: int = 0,
         psi_api_key: str = "",
         psi_sample: int = 0,
+        netrc_path: str = "",
     ) -> None:
         self.mode = mode
         self.input_path = input_path
@@ -269,6 +273,7 @@ class CrawlerOrchestrator:
         self.timing_sample = timing_sample
         self.psi_api_key = psi_api_key
         self.psi_sample = psi_sample
+        self.auth = load_netrc_auth(netrc_path)
         self.post_crawl_error = ""
         if locations_file:
             # Validate up front so a bad path fails before the crawl, not after it
@@ -328,6 +333,7 @@ class CrawlerOrchestrator:
             use_sitemap=self.use_sitemap,
             max_pages=self.max_pages,
             preserve_trailing_slash=self.preserve_trailing_slash,
+            auth=self.auth,
         )
 
         for t in initial_targets:
@@ -415,6 +421,7 @@ class CrawlerOrchestrator:
                         fast_http_first=self.fast_http_first,
                         max_retries=self.max_retries,
                         audit_cfg=self.audit_cfg,
+                        auth=self.auth,
                     )
                     in_flight[fut] = {
                         "slot_idx": slot_idx,
@@ -514,7 +521,7 @@ class CrawlerOrchestrator:
             if unvisited:
                 label = "unvisited link targets (--verify-all-links)" if self.verify_all_links else "malformed relative link targets"
                 print(f"Verifying {len(unvisited)} {label}...")
-                status_map, error_map = scraper.verify_link_targets(unvisited)
+                status_map, error_map = scraper.verify_link_targets(unvisited, auth=self.auth)
                 self.storage.update_link_target_statuses(status_map, error_map)
 
             timing = None
@@ -524,7 +531,7 @@ class CrawlerOrchestrator:
                 if self.timing_sample > 0:
                     sample_urls = select_sample_urls(all_pages, all_links, self.timing_sample)
                     print(f"Sequential timing sample of {len(sample_urls)} URLs (--timing-sample)...")
-                    timing = run_timing_sample(sample_urls, headers=dict(scraper.DEFAULT_HEADERS))
+                    timing = run_timing_sample(sample_urls, headers=dict(scraper.DEFAULT_HEADERS), auth=self.auth)
                     self.storage.set_meta("timing_sample", timing)
                 if self.psi_api_key and self.psi_sample > 0:
                     psi_urls = select_sample_urls(all_pages, all_links, self.psi_sample)

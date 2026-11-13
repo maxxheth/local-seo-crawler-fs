@@ -67,7 +67,7 @@ def test_malformed_targets_are_verified_not_crawled(monkeypatch: pytest.MonkeyPa
     })
     verified: list[list[str]] = []
 
-    def fake_verify(urls: list[str], client: Any = None, timeout: float = 10.0):
+    def fake_verify(urls: list[str], client: Any = None, timeout: float = 10.0, auth: Any = None):
         verified.append(list(urls))
         return {u: 200 for u in urls}, {}
 

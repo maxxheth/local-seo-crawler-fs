@@ -395,6 +395,14 @@ def build_parser(defaults: dict[str, object]) -> argparse.ArgumentParser:
         help="Number of URLs to query in PageSpeed Insights (requires --psi-api-key) [default: 0]",
     )
 
+    parser.add_argument(
+        "--netrc",
+        dest="netrc",
+        type=str,
+        default="",
+        help="netrc file with HTTP Basic Auth credentials (e.g. a staging site). Sent only to hosts named as a machine in the file [default: off]",
+    )
+
     # Report mode (WS3)
     parser.add_argument("--db", dest="db", type=str, default="", help="Crawl database for --mode report")
     parser.add_argument(
@@ -523,6 +531,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             timing_sample=args.timing_sample,
             psi_api_key=args.psi_api_key,
             psi_sample=args.psi_sample,
+            netrc_path=args.netrc,
         )
     except (FileNotFoundError, ValueError) as exc:
         parser.error(str(exc))

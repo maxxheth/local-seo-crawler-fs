@@ -65,6 +65,7 @@ def run_timing_sample(
     client: httpx.Client | None = None,
     headers: dict[str, str] | None = None,
     clock: Callable[[], float] = time.monotonic,
+    auth: httpx.Auth | None = None,
 ) -> dict[str, Any]:
     """Fetch URLs one at a time with a cache-busting query string and record TTFB.
 
@@ -72,7 +73,7 @@ def run_timing_sample(
     """
     own_client = client is None
     if client is None:
-        client = httpx.Client(timeout=20.0, follow_redirects=False, headers=headers or {})
+        client = httpx.Client(timeout=20.0, follow_redirects=False, headers=headers or {}, auth=auth)
     samples: list[dict[str, Any]] = []
     try:
         run_token = str(int(time.time()))

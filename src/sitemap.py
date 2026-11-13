@@ -160,11 +160,12 @@ class SitemapDiscovery:
         http_client: httpx.Client | None = None,
         max_urls: int = 1000,
         preserve_trailing_slash: bool = True,
+        auth: httpx.Auth | None = None,
     ) -> None:
         clean_domain = target_domain.lower().replace("https://", "").replace("http://", "").strip("/")
         self.target_domain = clean_domain
         self.base_url = f"https://{clean_domain}/"
-        self._client = http_client or httpx.Client(timeout=15.0, follow_redirects=True)
+        self._client = http_client or httpx.Client(timeout=15.0, follow_redirects=True, auth=auth)
         self._owns_client = http_client is None
         self.max_urls = max_urls
         self.preserve_trailing_slash = preserve_trailing_slash

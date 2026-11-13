@@ -81,6 +81,7 @@ def load_targets(
     use_sitemap: bool = True,
     max_pages: int = 1000,
     preserve_trailing_slash: bool = True,
+    auth: httpx.Auth | None = None,
 ) -> list[dict[str, Any]]:
     """Load initial targets from input file, sitemap, or CLI parameters."""
     targets: list[dict[str, Any]] = []
@@ -125,6 +126,7 @@ def load_targets(
                     clean_domain,
                     max_urls=max_pages,
                     preserve_trailing_slash=preserve_trailing_slash,
+                    auth=auth,
                 )
                 sitemap_urls = seeder.discover_urls()
                 logger.info("Sitemap discovery found %d initial URLs", len(sitemap_urls))
@@ -252,6 +254,7 @@ def verify_link_targets(
     urls: list[str],
     client: httpx.Client | None = None,
     timeout: float = 10.0,
+    auth: httpx.Auth | None = None,
 ) -> tuple[dict[str, int], dict[str, str]]:
     """Status-check link targets without parsing or queueing them.
 
@@ -262,7 +265,7 @@ def verify_link_targets(
     error_map: dict[str, str] = {}
     own_client = client is None
     if client is None:
-        client = httpx.Client(timeout=timeout, follow_redirects=False, headers=dict(DEFAULT_HEADERS))
+        client = httpx.Client(timeout=timeout, follow_redirects=False, headers=dict(DEFAULT_HEADERS), auth=auth)
     try:
         for url in urls:
             _resp, _chain, _dest, init_s, target_s, trans_err, _ttfb = fetch_with_redirect_inspection(
