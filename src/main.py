@@ -416,6 +416,13 @@ def build_parser(defaults: dict[str, object]) -> argparse.ArgumentParser:
         default=str(defaults.get("google_auth_profile", "")),
         help="Named Google API auth profile [default: GOOGLE_AUTH_PROFILE from .env]",
     )
+    parser.add_argument(
+        "--enable-google-enrichment",
+        dest="enable_google_enrichment",
+        action=argparse.BooleanOptionalAction,
+        default=bool(defaults.get("enable_google_enrichment", False)),
+        help="Fetch GA4, Search Console, and Business Profile signals into crawl_results.db after crawling [default: ENABLE_GOOGLE_ENRICHMENT or False]",
+    )
 
     # Report mode (WS3)
     parser.add_argument("--db", dest="db", type=str, default="", help="Crawl database for --mode report")
@@ -479,6 +486,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "slow_err_ms": 3000,
             "large_warn_bytes": 1048576,
             "large_err_bytes": 3145728,
+            "enable_google_enrichment": False,
         }
 
     parser = build_parser(cfg)
@@ -556,6 +564,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             psi_api_key=args.psi_api_key,
             psi_sample=args.psi_sample,
             netrc_path=args.netrc,
+            enable_google_enrichment=args.enable_google_enrichment,
+            google_auth_profile=args.google_auth_profile,
+            google_profiles_dir=str(cfg.get("google_profiles_dir", "")),
+            google_ga4_property_id=str(cfg.get("google_ga4_property_id", "")),
+            google_gsc_site_url=str(cfg.get("google_gsc_site_url", "")),
+            google_gbp_account_id=str(cfg.get("google_gbp_account_id", "")),
+            google_gbp_location_ids=tuple(cfg.get("google_gbp_location_ids", ())),
+            google_lookback_days=int(cfg.get("google_lookback_days", 28)),
         )
     except (FileNotFoundError, ValueError) as exc:
         parser.error(str(exc))

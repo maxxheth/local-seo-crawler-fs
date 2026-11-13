@@ -82,6 +82,7 @@ def load_config(env_file: str | Path | None = None) -> dict[str, Any]:
     psi_sample = int(os.getenv("PSI_SAMPLE", "0"))
 
     # Google API Integration (multi-profile)
+    enable_google_enrichment = _parse_bool(os.getenv("ENABLE_GOOGLE_ENRICHMENT"), default=False)
     google_auth_profile = os.getenv("GOOGLE_AUTH_PROFILE", "").strip()
     google_profiles_dir = os.getenv("GOOGLE_PROFILES_DIR", "").strip()
     google_ga4_property_id = os.getenv("GOOGLE_GA4_PROPERTY_ID", "").strip()
@@ -134,6 +135,7 @@ def load_config(env_file: str | Path | None = None) -> dict[str, Any]:
         "timing_sample": timing_sample,
         "psi_api_key": psi_api_key,
         "psi_sample": psi_sample,
+        "enable_google_enrichment": enable_google_enrichment,
         "google_auth_profile": google_auth_profile,
         "google_profiles_dir": google_profiles_dir,
         "google_ga4_property_id": google_ga4_property_id,

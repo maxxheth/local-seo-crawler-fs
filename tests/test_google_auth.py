@@ -13,7 +13,11 @@ from typing import Any
 import httpx
 import pytest
 
-from src.adapters.google_signals import GoogleSignalsClient, redact_secrets
+from src.adapters.google_signals import (
+    GoogleSignalsClient,
+    collect_and_persist_google_signals,
+    redact_secrets,
+)
 from src.config import load_config
 from src.google_auth import (
     CLOUD_PLATFORM_SCOPE,
@@ -29,7 +33,9 @@ from src.google_auth import (
     validate_client_file,
     verify_private_file,
 )
-from src.main import main as crawler_main
+from src.main import build_parser, main as crawler_main
+from src.orchestrator import CrawlerOrchestrator
+from src.storage import SQLiteStorage
 
 
 def _write_private_json(path: Path, payload: dict[str, Any], mode: int = 0o600) -> Path:
@@ -95,6 +101,7 @@ class _DummyCreds:
 @pytest.fixture(autouse=True)
 def _clean_google_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in (
+        "ENABLE_GOOGLE_ENRICHMENT",
         "GOOGLE_AUTH_PROFILE",
         "GOOGLE_PROFILES_DIR",
         "GOOGLE_GA4_PROPERTY_ID",
@@ -529,3 +536,324 @@ def test_logout_profile_unlinks_only_target_and_blocks_remote_revoke(tmp_path: P
     assert calls == []
     assert not Path(marv.token_file).exists()
     assert Path(gh.token_file).is_file()
+
+
+# ── 6. Part (b): SQLite Google enrichment tables & post-crawl orchestrator ─────
+
+
+def test_storage_google_enrichment_tables_and_idempotent_upserts(tmp_path: Path) -> None:
+    storage = SQLiteStorage(tmp_path / "crawl_results.db")
+
+    ga4_rows = [
+        {
+            "property_id": "562840962",
+            "metric_date": "2026-11-10",
+            "landing_page": "/austin",
+            "channel_group": "Organic Search",
+            "sessions": 120,
+            "engaged_sessions": 95,
+            "active_users": 102,
+            "key_events": 14.0,
+        },
+        {
+            "property_id": "562840962",
+            "metric_date": "2026-11-09",
+            "landing_page": "/",
+            "channel_group": "Direct",
+            "sessions": 80,
+            "engaged_sessions": 60,
+            "active_users": 70,
+            "key_events": 5.0,
+        },
+    ]
+    assert storage.save_google_ga4_pages_batch(ga4_rows) == 2
+    assert storage.save_google_ga4_pages_batch([{**ga4_rows[0], "sessions": 125}]) == 1
+    assert storage.save_google_ga4_pages_batch([]) == 0
+    fetched_ga4 = storage.fetch_google_ga4_pages("562840962")
+    assert len(fetched_ga4) == 2
+    assert fetched_ga4[0]["metric_date"] == "2026-11-09"
+    assert fetched_ga4[1]["landing_page"] == "/austin"
+    assert fetched_ga4[1]["sessions"] == 125
+
+    gsc_rows = [
+        {
+            "site_url": "sc-domain:facetofacespa.com",
+            "metric_date": "2026-11-10",
+            "page_url": "https://facetofacespa.com/austin",
+            "clicks": 45.0,
+            "impressions": 900.0,
+            "ctr": 0.05,
+            "position": 4.2,
+        }
+    ]
+    assert storage.save_google_gsc_pages_batch(gsc_rows) == 1
+    assert storage.save_google_gsc_pages_batch([{**gsc_rows[0], "clicks": 50.0}]) == 1
+    fetched_gsc = storage.fetch_google_gsc_pages("sc-domain:facetofacespa.com")
+    assert len(fetched_gsc) == 1
+    assert fetched_gsc[0]["clicks"] == 50.0
+
+    gbp_rows = [
+        {
+            "location_name": "locations/1002",
+            "account_id": "accounts/99",
+            "title": "Clinic B",
+            "store_code": "CB",
+            "website_uri": "https://example.com/b",
+            "raw": {"name": "locations/1002", "title": "Clinic B"},
+            "metric_start_date": "2026-11-01",
+            "metric_end_date": "2026-11-10",
+            "metrics": {"WEBSITE_CLICKS": 10},
+        },
+        {
+            "location_name": "locations/1001",
+            "account_id": "accounts/99",
+            "title": "Clinic A",
+            "store_code": "CA",
+            "website_uri": "https://example.com/a",
+            "raw": {"name": "locations/1001", "title": "Clinic A"},
+            "metric_start_date": "2026-11-01",
+            "metric_end_date": "2026-11-10",
+            "metrics": {"WEBSITE_CLICKS": 25},
+        },
+    ]
+    assert storage.save_google_gbp_locations_batch(gbp_rows) == 2
+    assert storage.save_google_gbp_locations_batch([{**gbp_rows[0], "title": "Clinic B Updated"}]) == 1
+    fetched_gbp = storage.fetch_google_gbp_locations("accounts/99")
+    assert [r["location_name"] for r in fetched_gbp] == ["locations/1001", "locations/1002"]
+    assert fetched_gbp[1]["title"] == "Clinic B Updated"
+    assert fetched_gbp[0]["raw"]["title"] == "Clinic A"
+    assert fetched_gbp[0]["metrics"]["WEBSITE_CLICKS"] == 25
+
+
+def test_collect_and_persist_google_signals_handles_gbp_zero_qpm_gracefully(tmp_path: Path) -> None:
+    storage = SQLiteStorage(tmp_path / "crawl_results.db")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "analyticsdata.googleapis.com" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "rows": [
+                        {
+                            "dimensionValues": [
+                                {"value": "20261110"},
+                                {"value": "/services/facials"},
+                                {"value": "Organic Search"},
+                            ],
+                            "metricValues": [
+                                {"value": "42"},
+                                {"value": "35"},
+                                {"value": "38"},
+                                {"value": "4"},
+                            ],
+                        }
+                    ]
+                },
+            )
+        if "webmasters/v3" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "rows": [
+                        {
+                            "keys": ["2026-11-10", "https://facetofacespa.com/services/facials"],
+                            "clicks": 19,
+                            "impressions": 410,
+                            "ctr": 0.0463,
+                            "position": 6.1,
+                        }
+                    ]
+                },
+            )
+        if "mybusinessaccountmanagement.googleapis.com" in url:
+            return httpx.Response(
+                429,
+                json={
+                    "error": {
+                        "code": 429,
+                        "status": "RESOURCE_EXHAUSTED",
+                        "message": "Quota exceeded Bearer ya29.secret-leak",
+                    }
+                },
+            )
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    client = GoogleSignalsClient(_DummyCreds(), http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    summary = collect_and_persist_google_signals(
+        storage,
+        client,
+        profile_name="marvenio",
+        ga4_property_id="562840962",
+        gsc_site_url="sc-domain:facetofacespa.com",
+        gbp_account_id="auto",
+        lookback_days=7,
+        end_date=date(2026, 11, 10),
+    )
+
+    assert summary["enabled"] is True
+    assert summary["window"] == {
+        "start_date": "2026-11-04",
+        "end_date": "2026-11-10",
+        "lookback_days": 7,
+    }
+    assert summary["sources"]["ga4"]["ok"] is True
+    assert summary["sources"]["ga4"]["rows_saved"] == 1
+    assert summary["sources"]["gsc"]["ok"] is True
+    assert summary["sources"]["gsc"]["rows_saved"] == 1
+    assert summary["sources"]["gbp"]["ok"] is False
+    assert summary["sources"]["gbp"]["external_gate"] == "GBP_QUOTA_ZERO_QPM"
+    assert "ya29.secret-leak" not in summary["sources"]["gbp"]["detail"]
+    assert summary["has_errors"] is True
+
+    ga4_saved = storage.fetch_google_ga4_pages()
+    assert len(ga4_saved) == 1
+    assert ga4_saved[0]["metric_date"] == "2026-11-10"
+    assert ga4_saved[0]["landing_page"] == "/services/facials"
+    assert ga4_saved[0]["sessions"] == 42
+
+    gsc_saved = storage.fetch_google_gsc_pages()
+    assert len(gsc_saved) == 1
+    assert gsc_saved[0]["page_url"] == "https://facetofacespa.com/services/facials"
+    assert gsc_saved[0]["clicks"] == 19.0
+
+    assert storage.get_meta("google_enrichment") == summary
+
+
+def test_collect_and_persist_google_signals_gbp_pagination_and_metrics(tmp_path: Path) -> None:
+    storage = SQLiteStorage(tmp_path / "crawl_results.db")
+    seen_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        seen_urls.append(url)
+        if url.startswith("https://mybusinessaccountmanagement.googleapis.com/v1/accounts"):
+            return httpx.Response(200, json={"accounts": [{"name": "accounts/777"}]})
+        if "accounts/777/locations" in url:
+            if "pageToken=page-2" in url:
+                return httpx.Response(
+                    200,
+                    json={
+                        "locations": [
+                            {
+                                "name": "locations/202",
+                                "title": "Spa North",
+                                "storeCode": "NORTH",
+                                "websiteUri": "https://example.com/north",
+                            }
+                        ]
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "locations": [
+                        {
+                            "name": "locations/201",
+                            "title": "Spa Central",
+                            "storeCode": "CENT",
+                            "websiteUri": "https://example.com/central",
+                        }
+                    ],
+                    "nextPageToken": "page-2",
+                },
+            )
+        if "locations/202:fetchMultiDailyMetricsTimeSeries" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "multiDailyMetricTimeSeries": [
+                        {"dailyMetricTimeSeries": [{"dailyMetric": "WEBSITE_CLICKS"}]}
+                    ]
+                },
+            )
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    client = GoogleSignalsClient(_DummyCreds(), http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    summary = collect_and_persist_google_signals(
+        storage,
+        client,
+        profile_name="marvenio",
+        gbp_account_id="auto",
+        gbp_location_ids=("202",),
+        lookback_days=7,
+        end_date=date(2026, 11, 10),
+    )
+
+    assert summary["ok"] is True
+    assert summary["sources"]["ga4"]["configured"] is False
+    assert summary["sources"]["gsc"]["configured"] is False
+    assert summary["sources"]["gbp"]["ok"] is True
+    assert summary["sources"]["gbp"]["rows_saved"] == 1
+    assert any("pageToken=page-2" in u for u in seen_urls)
+
+    locs = storage.fetch_google_gbp_locations()
+    assert len(locs) == 1
+    assert locs[0]["location_name"] == "locations/202"
+    assert locs[0]["account_id"] == "accounts/777"
+    assert locs[0]["store_code"] == "NORTH"
+    assert locs[0]["metrics"]["multiDailyMetricTimeSeries"][0]["dailyMetricTimeSeries"][0]["dailyMetric"] == "WEBSITE_CLICKS"
+
+
+def test_orchestrator_google_enrichment_toggle_and_non_fatal_auth_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_file = tmp_path / ".env.site"
+    vault_dir = tmp_path / "vault"
+    env_file.write_text(
+        "\n".join(
+            [
+                "ENABLE_GOOGLE_ENRICHMENT=true",
+                "GOOGLE_AUTH_PROFILE=missing-profile",
+                f"GOOGLE_PROFILES_DIR={vault_dir}",
+                "GOOGLE_GA4_PROPERTY_ID=557343330",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(env_file)
+    assert cfg["enable_google_enrichment"] is True
+    parser = build_parser(cfg)
+    parsed = parser.parse_args([])
+    assert parsed.enable_google_enrichment is True
+    parsed_off = parser.parse_args(["--no-enable-google-enrichment"])
+    assert parsed_off.enable_google_enrichment is False
+
+    # Stub scrape/queue/pool so CrawlerOrchestrator.run() exercises post-crawl export cleanly
+    monkeypatch.setattr("src.orchestrator.scraper.load_targets", lambda *args, **kwargs: [])
+    monkeypatch.setattr("src.orchestrator.scraper.parse_proxies_file", lambda _path: [])
+    monkeypatch.setattr("src.orchestrator.scraper.create_flaresolverr_session", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("src.orchestrator.scraper.destroy_flaresolverr_session", lambda *_args, **_kwargs: True)
+    out_off = tmp_path / "out_off"
+    orch_off = CrawlerOrchestrator(
+        mode="competitor",
+        domain="example.com",
+        output_dir=str(out_off),
+        enable_google_enrichment=False,
+    )
+    orch_off.storage.save_page({"url": "https://example.com/", "title": "Home", "status_code": 200}, domain="example.com")
+    artifacts_off = orch_off.run()
+    assert artifacts_off
+    assert orch_off.storage.get_meta("google_enrichment") is None
+
+    # Enabled enrichment with missing/bad profile degrades gracefully without aborting crawl export
+    out_err = tmp_path / "out_err"
+    orch_err = CrawlerOrchestrator(
+        mode="competitor",
+        domain="example.com",
+        output_dir=str(out_err),
+        enable_google_enrichment=True,
+        google_auth_profile="missing-profile",
+        google_profiles_dir=str(vault_dir),
+    )
+    orch_err.storage.save_page({"url": "https://example.com/", "title": "Home", "status_code": 200}, domain="example.com")
+    artifacts_err = orch_err.run()
+    assert artifacts_err
+    meta = orch_err.storage.get_meta("google_enrichment")
+    assert meta is not None
+    assert meta["enabled"] is True
+    assert meta["ok"] is False
+    assert "missing-profile" in meta["error"]

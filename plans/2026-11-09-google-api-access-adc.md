@@ -32,6 +32,7 @@
 See `.env.example`:
 
 ```dotenv
+ENABLE_GOOGLE_ENRICHMENT=false
 GOOGLE_AUTH_PROFILE=
 GOOGLE_PROFILES_DIR=
 GOOGLE_GA4_PROPERTY_ID=
@@ -41,7 +42,7 @@ GOOGLE_GBP_LOCATION_IDS=
 GOOGLE_LOOKBACK_DAYS=28
 ```
 
-Pass `--env-file /path/to/.env.site` to either `crawler-google-auth` or `local-seo-crawler` to switch sites cleanly without editing the root `.env`.
+Pass `--env-file /path/to/.env.site` to either `crawler-google-auth` or `local-seo-crawler` to switch sites cleanly without editing the root `.env`. Pass `--enable-google-enrichment` (or set `ENABLE_GOOGLE_ENRICHMENT=true`) to fetch read-only Google signals into `crawl_results.db` after crawling.
 
 ## CLI Workflow (`crawler-google-auth`)
 
@@ -90,7 +91,16 @@ uv run crawler-google-auth verify --profile marvenio \
 ```
 - `GoogleSignalsClient` enforces strictly read-only endpoints/methods, omits `X-Goog-User-Project` (so `cloud-platform` scope is not required), scrubs Bearer/token strings from errors, and classifies GBP `HTTP 429 RESOURCE_EXHAUSTED` as `GBP_QUOTA_ZERO_QPM`.
 
-### 5. Local Credential Removal (`logout`)
+### 5. Optional Post-Crawl SQLite Enrichment (`ENABLE_GOOGLE_ENRICHMENT`)
+When `ENABLE_GOOGLE_ENRICHMENT=true` (or `--enable-google-enrichment`) is enabled for a crawl, `CrawlerOrchestrator` runs `collect_and_persist_google_signals(...)` post-crawl and upserts normalized rows into deterministic tables inside `crawl_results.db`:
+- `google_ga4_pages` — keyed by `(property_id, metric_date, landing_page, channel_group)`
+- `google_gsc_pages` — keyed by `(site_url, metric_date, page_url)`
+- `google_gbp_locations` — keyed by `(location_name)` with location metadata + daily performance time-series JSON
+- `crawl_metadata['google_enrichment']` — sanitized run summary (`window`, per-source `ok`/`rows_saved`/`external_gate`)
+
+Failures on an individual Google API (such as `GBP_QUOTA_ZERO_QPM`) or an unauthenticated profile are recorded in `crawl_metadata` with OAuth tokens scrubbed and never abort crawl artifact export.
+
+### 6. Local Credential Removal (`logout`)
 ```bash
 uv run crawler-google-auth logout --profile marvenio
 ```

@@ -170,6 +170,48 @@ class SQLiteStorage:
                 url_b TEXT NOT NULL,
                 similarity REAL NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS google_ga4_pages (
+                property_id TEXT NOT NULL,
+                metric_date TEXT NOT NULL,
+                landing_page TEXT NOT NULL,
+                channel_group TEXT NOT NULL,
+                sessions INTEGER NOT NULL DEFAULT 0,
+                engaged_sessions INTEGER NOT NULL DEFAULT 0,
+                active_users INTEGER NOT NULL DEFAULT 0,
+                key_events REAL NOT NULL DEFAULT 0.0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (property_id, metric_date, landing_page, channel_group)
+            );
+
+            CREATE TABLE IF NOT EXISTS google_gsc_pages (
+                site_url TEXT NOT NULL,
+                metric_date TEXT NOT NULL,
+                page_url TEXT NOT NULL,
+                clicks REAL NOT NULL DEFAULT 0.0,
+                impressions REAL NOT NULL DEFAULT 0.0,
+                ctr REAL NOT NULL DEFAULT 0.0,
+                position REAL NOT NULL DEFAULT 0.0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (site_url, metric_date, page_url)
+            );
+
+            CREATE TABLE IF NOT EXISTS google_gbp_locations (
+                location_name TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                store_code TEXT NOT NULL DEFAULT '',
+                website_uri TEXT NOT NULL DEFAULT '',
+                raw_json TEXT NOT NULL,
+                metric_start_date TEXT NOT NULL DEFAULT '',
+                metric_end_date TEXT NOT NULL DEFAULT '',
+                metrics_json TEXT NOT NULL DEFAULT '{}',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_google_ga4_landing_page ON google_ga4_pages(landing_page);
+            CREATE INDEX IF NOT EXISTS idx_google_gsc_page_url ON google_gsc_pages(page_url);
+            CREATE INDEX IF NOT EXISTS idx_google_gbp_website_uri ON google_gbp_locations(website_uri);
             """)
             self._ensure_columns(conn, "pages", _PAGE_COLUMN_MIGRATIONS)
             self._ensure_columns(conn, "internal_links", _LINK_COLUMN_MIGRATIONS)
@@ -714,3 +756,173 @@ class SQLiteStorage:
         with self._get_connection() as conn:
             row = conn.execute(f"SELECT COUNT(*) as cnt FROM {table}").fetchone()
             return row["cnt"] if row else 0
+
+    def save_google_ga4_pages_batch(self, rows: Sequence[dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+        params = [
+            (
+                str(r.get("property_id", "")),
+                str(r.get("metric_date", "")),
+                str(r.get("landing_page", "")),
+                str(r.get("channel_group", "")),
+                int(r.get("sessions", 0) or 0),
+                int(r.get("engaged_sessions", 0) or 0),
+                int(r.get("active_users", 0) or 0),
+                float(r.get("key_events", 0.0) or 0.0),
+            )
+            for r in rows
+        ]
+        with self._get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO google_ga4_pages (
+                    property_id, metric_date, landing_page, channel_group,
+                    sessions, engaged_sessions, active_users, key_events
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
+        return len(params)
+
+    def fetch_google_ga4_pages(self, property_id: str = "") -> list[dict[str, Any]]:
+        query = (
+            "SELECT property_id, metric_date, landing_page, channel_group, "
+            "sessions, engaged_sessions, active_users, key_events "
+            "FROM google_ga4_pages "
+        )
+        args: tuple[str, ...] = ()
+        if property_id:
+            query += "WHERE property_id = ? "
+            args = (property_id,)
+        query += "ORDER BY property_id, metric_date, landing_page, channel_group"
+        with self._get_connection() as conn:
+            rows = conn.execute(query, args).fetchall()
+        return [
+            {
+                "property_id": str(r["property_id"]),
+                "metric_date": str(r["metric_date"]),
+                "landing_page": str(r["landing_page"]),
+                "channel_group": str(r["channel_group"]),
+                "sessions": int(r["sessions"]),
+                "engaged_sessions": int(r["engaged_sessions"]),
+                "active_users": int(r["active_users"]),
+                "key_events": float(r["key_events"]),
+            }
+            for r in rows
+        ]
+
+    def save_google_gsc_pages_batch(self, rows: Sequence[dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+        params = [
+            (
+                str(r.get("site_url", "")),
+                str(r.get("metric_date", "")),
+                str(r.get("page_url", "")),
+                float(r.get("clicks", 0.0) or 0.0),
+                float(r.get("impressions", 0.0) or 0.0),
+                float(r.get("ctr", 0.0) or 0.0),
+                float(r.get("position", 0.0) or 0.0),
+            )
+            for r in rows
+        ]
+        with self._get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO google_gsc_pages (
+                    site_url, metric_date, page_url, clicks, impressions, ctr, position
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
+        return len(params)
+
+    def fetch_google_gsc_pages(self, site_url: str = "") -> list[dict[str, Any]]:
+        query = (
+            "SELECT site_url, metric_date, page_url, clicks, impressions, ctr, position "
+            "FROM google_gsc_pages "
+        )
+        args: tuple[str, ...] = ()
+        if site_url:
+            query += "WHERE site_url = ? "
+            args = (site_url,)
+        query += "ORDER BY site_url, metric_date, page_url"
+        with self._get_connection() as conn:
+            rows = conn.execute(query, args).fetchall()
+        return [
+            {
+                "site_url": str(r["site_url"]),
+                "metric_date": str(r["metric_date"]),
+                "page_url": str(r["page_url"]),
+                "clicks": float(r["clicks"]),
+                "impressions": float(r["impressions"]),
+                "ctr": float(r["ctr"]),
+                "position": float(r["position"]),
+            }
+            for r in rows
+        ]
+
+    def save_google_gbp_locations_batch(self, rows: Sequence[dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+        params = []
+        for r in rows:
+            raw_json = r.get("raw_json")
+            if not isinstance(raw_json, str):
+                raw_json = json.dumps(r.get("raw", {}), ensure_ascii=False)
+            metrics_json = r.get("metrics_json")
+            if not isinstance(metrics_json, str):
+                metrics_json = json.dumps(r.get("metrics", {}), ensure_ascii=False)
+            params.append(
+                (
+                    str(r.get("location_name", "")),
+                    str(r.get("account_id", "")),
+                    str(r.get("title", "")),
+                    str(r.get("store_code", "")),
+                    str(r.get("website_uri", "")),
+                    raw_json,
+                    str(r.get("metric_start_date", "")),
+                    str(r.get("metric_end_date", "")),
+                    metrics_json,
+                )
+            )
+        with self._get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO google_gbp_locations (
+                    location_name, account_id, title, store_code, website_uri,
+                    raw_json, metric_start_date, metric_end_date, metrics_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
+        return len(params)
+
+    def fetch_google_gbp_locations(self, account_id: str = "") -> list[dict[str, Any]]:
+        query = (
+            "SELECT location_name, account_id, title, store_code, website_uri, "
+            "raw_json, metric_start_date, metric_end_date, metrics_json "
+            "FROM google_gbp_locations "
+        )
+        args: tuple[str, ...] = ()
+        if account_id:
+            query += "WHERE account_id = ? "
+            args = (account_id,)
+        query += "ORDER BY location_name"
+        with self._get_connection() as conn:
+            rows = conn.execute(query, args).fetchall()
+        return [
+            {
+                "location_name": str(r["location_name"]),
+                "account_id": str(r["account_id"]),
+                "title": str(r["title"]),
+                "store_code": str(r["store_code"]),
+                "website_uri": str(r["website_uri"]),
+                "metric_start_date": str(r["metric_start_date"]),
+                "metric_end_date": str(r["metric_end_date"]),
+                "raw": json.loads(r["raw_json"]) if r["raw_json"] else {},
+                "metrics": json.loads(r["metrics_json"]) if r["metrics_json"] else {},
+            }
+            for r in rows
+        ]

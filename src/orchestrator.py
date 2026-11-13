@@ -215,6 +215,15 @@ class CrawlerOrchestrator:
         psi_api_key: str = "",
         psi_sample: int = 0,
         netrc_path: str = "",
+        # Google API enrichment (optional post-crawl signals)
+        enable_google_enrichment: bool = False,
+        google_auth_profile: str = "",
+        google_profiles_dir: str = "",
+        google_ga4_property_id: str = "",
+        google_gsc_site_url: str = "",
+        google_gbp_account_id: str = "",
+        google_gbp_location_ids: tuple[str, ...] = (),
+        google_lookback_days: int = 28,
     ) -> None:
         self.mode = mode
         self.input_path = input_path
@@ -274,6 +283,14 @@ class CrawlerOrchestrator:
         self.psi_api_key = psi_api_key
         self.psi_sample = psi_sample
         self.auth = load_netrc_auth(netrc_path)
+        self.enable_google_enrichment = enable_google_enrichment
+        self.google_auth_profile = google_auth_profile
+        self.google_profiles_dir = google_profiles_dir
+        self.google_ga4_property_id = google_ga4_property_id
+        self.google_gsc_site_url = google_gsc_site_url
+        self.google_gbp_account_id = google_gbp_account_id
+        self.google_gbp_location_ids = tuple(google_gbp_location_ids)
+        self.google_lookback_days = google_lookback_days
         self.post_crawl_error = ""
         if locations_file:
             # Validate up front so a bad path fails before the crawl, not after it
@@ -561,6 +578,9 @@ class CrawlerOrchestrator:
                 print(f"ERROR: post-crawl analysis failed ({self.post_crawl_error}); exporting without classification.")
                 self.storage.post_crawl_sync()
 
+        if self.enable_google_enrichment:
+            self._run_google_enrichment_pass()
+
         # Export final artifacts from SQLite storage
         meta: dict[str, Any] = {
             "business": self.business_name,
@@ -598,3 +618,48 @@ class CrawlerOrchestrator:
                 scraper.destroy_flaresolverr_session(self.flaresolverr_url, sess_id)
 
         return artifacts
+
+    def _run_google_enrichment_pass(self) -> dict[str, Any]:
+        """Fetch optional read-only Google signals into SQLite without aborting crawl export."""
+        from src.adapters.google_signals import (
+            GoogleSignalsClient,
+            collect_and_persist_google_signals,
+            redact_secrets,
+        )
+        from src.google_auth import ProfileStore, load_credentials, resolve_profile_name
+
+        try:
+            profile_name = resolve_profile_name(self.google_auth_profile)
+            store = ProfileStore(self.google_profiles_dir or None)
+            profile = store.get_profile(profile_name)
+            creds = load_credentials(profile, refresh=True)
+            print(f"Collecting read-only Google signals using profile '{profile.name}'...")
+            with GoogleSignalsClient(creds) as client:
+                summary = collect_and_persist_google_signals(
+                    self.storage,
+                    client,
+                    profile_name=profile.name,
+                    ga4_property_id=self.google_ga4_property_id,
+                    gsc_site_url=self.google_gsc_site_url,
+                    gbp_account_id=self.google_gbp_account_id,
+                    gbp_location_ids=self.google_gbp_location_ids,
+                    lookback_days=self.google_lookback_days,
+                )
+            for name, src in summary.get("sources", {}).items():
+                if src.get("configured"):
+                    status_label = "ok" if src.get("ok") else (src.get("external_gate") or "error")
+                    print(f"  - google[{name}]: {status_label} ({src.get('rows_saved', 0)} rows saved)")
+            return summary
+        except Exception as exc:
+            scrubbed = redact_secrets(str(exc))
+            err_meta: dict[str, Any] = {
+                "enabled": True,
+                "profile": self.google_auth_profile,
+                "ok": False,
+                "has_errors": True,
+                "error": scrubbed,
+            }
+            self.storage.set_meta("google_enrichment", err_meta)
+            logger.warning("Google enrichment skipped due to error: %s", scrubbed)
+            print(f"WARNING: Google enrichment skipped ({scrubbed}); continuing crawl export.")
+            return err_meta
